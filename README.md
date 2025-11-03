@@ -15,3 +15,6 @@ Captures parcel label via camera → extracts Supplier, Resident Name, Unit, and
    source venv/bin/activate
    pip install -r requirements.txt
    python app.py
+
+Haven't pushed the Javascript script for browser automation due to privacy reasons onsite
+   
