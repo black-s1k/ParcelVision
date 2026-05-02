@@ -79,9 +79,9 @@ if [ -n "${TAILSCALE_URL:-}" ]; then
     SERVER_URL="$TAILSCALE_URL"
     ok "Tailscale (permanent): $SERVER_URL"
 
-# Priority 2: cloudflared quick tunnel — auto-parses URL, no manual edit needed
+# Priority 2: cloudflared quick tunnel (no admin needed, just needs cloudflared)
 elif command -v cloudflared &>/dev/null; then
-    info "Starting Cloudflare Quick Tunnel (URL is captured automatically)..."
+    info "Starting Cloudflare Quick Tunnel..."
     TUNNEL_LOG="$(mktemp)"
     cloudflared tunnel --url "http://localhost:5002" --no-autoupdate \
         >"$TUNNEL_LOG" 2>&1 &
@@ -99,18 +99,46 @@ elif command -v cloudflared &>/dev/null; then
     if [ -n "$SERVER_URL" ]; then
         ok "Cloudflare tunnel: $SERVER_URL"
     else
-        warn "Cloudflare URL not captured — falling back to local IP."
+        warn "Cloudflare URL not captured — falling back to SSH tunnel."
+        kill "$CF_PID" 2>/dev/null || true
+        CF_PID=""
+    fi
+
+# Priority 3: localhost.run SSH tunnel (no install, no admin — uses built-in SSH)
+elif command -v ssh &>/dev/null; then
+    info "Starting SSH tunnel via localhost.run (no admin required)..."
+    TUNNEL_LOG="$(mktemp)"
+    ssh -o StrictHostKeyChecking=no \
+        -o ServerAliveInterval=30 \
+        -R "80:localhost:5002" \
+        nokey@localhost.run \
+        >"$TUNNEL_LOG" 2>&1 &
+    CF_PID=$!
+
+    for i in $(seq 1 20); do
+        SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.lhr\.life' \
+            "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
+        [ -n "$SERVER_URL" ] && break
+        printf "  waiting for tunnel... %ds\r" "$i"
+        sleep 1
+    done
+    echo ""
+
+    if [ -n "$SERVER_URL" ]; then
+        ok "SSH tunnel (localhost.run): $SERVER_URL"
+    else
+        warn "SSH tunnel URL not captured — falling back to local IP."
         kill "$CF_PID" 2>/dev/null || true
         CF_PID=""
         SERVER_URL="http://$(local_ip):5002"
         info "Local IP fallback: $SERVER_URL"
     fi
 
-# Priority 3: local network IP (phone and work PC must be on same Wi-Fi)
+# Priority 4: local network IP (phone and PC must be on same Wi-Fi)
 else
-    warn "cloudflared not installed — using local IP."
-    warn "For remote access: brew install cloudflare/cloudflare/cloudflared"
-    warn "For permanent URL: install Tailscale and set TAILSCALE_URL in .env"
+    warn "No tunnel available — using local IP."
+    warn "Phone must be on the same Wi-Fi as this machine."
+    warn "Find your IP with: ipconfig (Windows) or ifconfig (Mac/Linux)"
     SERVER_URL="http://$(local_ip):5002"
     info "Local: $SERVER_URL"
 fi
