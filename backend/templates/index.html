@@ -565,6 +565,36 @@
       `).join("");
     }
 
+    /* ── Compress image via canvas (target ≤ 900 KB) ─────────────── */
+    function compressImage(file) {
+      return new Promise(function(resolve) {
+        var MAX_PX = 1600;
+        var MAX_BYTES = 900 * 1024;
+
+        var img = new Image();
+        img.onload = function() {
+          var w = img.width, h = img.height;
+          if (Math.max(w, h) > MAX_PX) {
+            var scale = MAX_PX / Math.max(w, h);
+            w = Math.round(w * scale);
+            h = Math.round(h * scale);
+          }
+
+          var canvas = document.createElement("canvas");
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+
+          // Try quality 0.85 first, then 0.70 if still too large
+          canvas.toBlob(function(blob) {
+            if (blob && blob.size <= MAX_BYTES) { resolve(blob); return; }
+            canvas.toBlob(function(b2) { resolve(b2 || blob); }, "image/jpeg", 0.70);
+          }, "image/jpeg", 0.85);
+        };
+        img.onerror = function() { resolve(file); };
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
     /* ── Submit ───────────────────────────────────────────────── */
     submitBtn.addEventListener("click", async () => {
       const file = fileInput.files[0];
@@ -572,14 +602,24 @@
 
       submitBtn.disabled = true;
       resultCard.classList.remove("show");
-      setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label…");
+      setStatus("info", `<div class="spinner"></div>`, "Compressing image…");
+
+      let blob;
+      try { blob = await compressImage(file); } catch(_) { blob = file; }
+      const kb = (blob.size / 1024).toFixed(0);
+      setStatus("info", `<div class="spinner"></div>`, `Analysing parcel label… (${kb} KB)`);
 
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", blob, "image.jpg");
 
       try {
         const res  = await fetch("/upload", { method: "POST", body: formData });
-        const body = await res.json();
+        let body;
+        try {
+          body = await res.json();
+        } catch (_) {
+          throw new Error(`Server returned non-JSON (status ${res.status}). Check Flask logs.`);
+        }
 
         if (body.status === "success") {
           setStatus("success", "✅", body.message || "Parcel logged successfully.");
