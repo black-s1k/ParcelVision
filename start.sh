@@ -79,8 +79,9 @@ local_ip() {
 
     # Windows (Git Bash / MINGW / CYGWIN)
     if [[ "$os" == MINGW* || "$os" == CYGWIN* ]]; then
+        # grep directly for IPv4 lines — section header is several lines
+        # above the address so -A1 never reaches it
         ip=$(ipconfig 2>/dev/null \
-            | grep -A1 "Wireless\|Wi-Fi\|Ethernet" \
             | grep "IPv4" \
             | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
             | grep -v "^127\." \

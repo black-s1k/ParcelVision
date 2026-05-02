@@ -146,8 +146,45 @@ def main():
     err = result.get("result", {}).get("exceptionDetails") or result.get("error")
     if err:
         print(f"⚠️   Injection note: {err}")
+        return
+
+    print(f"   SERVER_URL injected: {server_url}")
+
+    # Verify the script globals landed on the window
+    verify = _inject(tab, "typeof window.startValetListener === 'function'")
+    confirmed = verify.get("result", {}).get("result", {}).get("value", False)
+    if confirmed:
+        print("   Script globals confirmed on window (startValetListener ✓)")
     else:
-        print(f"   SERVER_URL injected: {server_url}")
+        print("⚠️   startValetListener not found — injection may have failed")
+        return
+
+    # Check whether the ADD DELIVERY popup (suite input) is already open
+    popup_check = _inject(tab, """
+        (function() {
+            var inputs = Array.prototype.slice.call(document.querySelectorAll('input'));
+            var found = inputs.find(function(inp) {
+                return inp.placeholder &&
+                       inp.placeholder.toLowerCase().includes('suite') &&
+                       inp.offsetParent !== null;
+            });
+            return !!found;
+        })()
+    """)
+    popup_open = popup_check.get("result", {}).get("result", {}).get("value", False)
+    if popup_open:
+        print("   'ADD DELIVERY' popup detected — listener will start automatically ✓")
+    else:
+        print("")
+        print("  ┌─────────────────────────────────────────────────────┐")
+        print("  │  ⚠️  'ADD DELIVERY' popup is NOT open in this tab.  │")
+        print("  │  Open it now — the listener auto-starts in 3 s.    │")
+        print("  │  Or check the console and call startValetListener() │")
+        print("  └─────────────────────────────────────────────────────┘")
+        print("")
+    print("  To verify in Chrome DevTools console:")
+    print("    valetStatus()           ← shows running state + server URL")
+    print("    startValetListener()    ← (re-)start manually if needed")
 
 
 if __name__ == "__main__":
