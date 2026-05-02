@@ -61,34 +61,46 @@ save_server_url() {
 import sys, re
 path, url = sys.argv[1], sys.argv[2]
 try:
-    content = open(path).read()
+    content = open(path, newline='').read().replace('\r\n', '\n').replace('\r', '\n')
 except FileNotFoundError:
     content = ""
 if re.search(r'^SERVER_URL=', content, re.MULTILINE):
     content = re.sub(r'^SERVER_URL=.*', f'SERVER_URL={url}', content, flags=re.MULTILINE)
 else:
     content = content.rstrip('\n') + f'\nSERVER_URL={url}\n'
-open(path, 'w').write(content)
+open(path, 'w', newline='\n').write(content)
 PYEOF
 }
 
 # ── Helper: local IP (Windows / Mac / Linux) ──────────────────────────
 local_ip() {
-    # Windows (Git Bash) — parse ipconfig output
-    if command -v ipconfig &>/dev/null && [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
-        ipconfig 2>/dev/null \
+    local ip="" os
+    os="$(uname -s)"
+
+    # Windows (Git Bash / MINGW / CYGWIN)
+    if [[ "$os" == MINGW* || "$os" == CYGWIN* ]]; then
+        ip=$(ipconfig 2>/dev/null \
             | grep -A1 "Wireless\|Wi-Fi\|Ethernet" \
             | grep "IPv4" \
             | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
             | grep -v "^127\." \
-            | head -1 && return
+            | head -1 || true)
+        echo "${ip:-127.0.0.1}"
+        return
     fi
+
     # macOS
-    ipconfig getifaddr en0 2>/dev/null && return
-    ipconfig getifaddr en1 2>/dev/null && return
-    # Linux
-    hostname -I 2>/dev/null | awk '{print $1}' && return
-    echo "127.0.0.1"
+    if [[ "$os" == Darwin* ]]; then
+        ip=$(ipconfig getifaddr en0 2>/dev/null || true)
+        [ -n "$ip" ] && echo "$ip" && return
+        ip=$(ipconfig getifaddr en1 2>/dev/null || true)
+        echo "${ip:-127.0.0.1}"
+        return
+    fi
+
+    # Linux / WSL
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+    echo "${ip:-127.0.0.1}"
 }
 
 # ── 1. Resolve SERVER_URL ─────────────────────────────────────────────
