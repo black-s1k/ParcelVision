@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
 # ParcelVision — one-command startup
-#   • Resolves a public SERVER_URL (Tailscale → cloudflared → local IP)
+#   • Resolves a public SERVER_URL (Tailscale → cloudflared → localhost.run → local IP)
 #   • Starts Flask (app2.py)
 #   • Injects the 1Valet listener script into Chrome automatically
 #
-# Usage:  ./start.sh
+# Usage (Git Bash on Windows):  ./start.sh
 #
-# One-time Chrome setup (do this once, not every time):
-#   macOS:  open -a "Google Chrome" --args --remote-debugging-port=9222
-#   Linux:  google-chrome --remote-debugging-port=9222 &
-#   Or add --remote-debugging-port=9222 to your Chrome shortcut permanently.
+# One-time Chrome setup — run this once, then always launch Chrome the same way:
+#   Windows: Add --remote-debugging-port=9222 to your Chrome shortcut target, or run:
+#     "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -22,14 +21,13 @@ ENV_FILE="$BACKEND/.env"
 C_CYAN='\033[0;36m'; C_GREEN='\033[0;32m'
 C_YELLOW='\033[1;33m'; C_RED='\033[0;31m'; C_RESET='\033[0m'
 info()  { echo -e "${C_CYAN}  $*${C_RESET}"; }
-ok()    { echo -e "${C_GREEN}  ✅ $*${C_RESET}"; }
-warn()  { echo -e "${C_YELLOW}  ⚠️  $*${C_RESET}"; }
-err()   { echo -e "${C_RED}  ❌ $*${C_RESET}"; }
+ok()    { echo -e "${C_GREEN}  [OK] $*${C_RESET}"; }
+warn()  { echo -e "${C_YELLOW}  [!]  $*${C_RESET}"; }
 
 echo ""
-echo "╔══════════════════════════════════════════════════════════╗"
-echo "║            ParcelVision — Starting up                    ║"
-echo "╚══════════════════════════════════════════════════════════╝"
+echo "============================================================"
+echo "  ParcelVision -- Starting up"
+echo "============================================================"
 echo ""
 
 # ── Load .env ─────────────────────────────────────────────────────────
@@ -37,16 +35,26 @@ if [ -f "$ENV_FILE" ]; then
     set -a; source "$ENV_FILE"; set +a
 fi
 
+# ── Detect Python command (python3 on Mac/Linux, python on Windows) ───
+if command -v python3 &>/dev/null; then
+    PY="python3"
+elif command -v python &>/dev/null; then
+    PY="python"
+else
+    echo "  [!] Python not found. Activate your venv first."
+    exit 1
+fi
+
 # ── Globals ───────────────────────────────────────────────────────────
 SERVER_URL=""
-CF_PID=""
+TUNNEL_PID=""
 FLASK_PID=""
 TUNNEL_LOG=""
 
 # ── Helper: write SERVER_URL into .env ────────────────────────────────
 save_server_url() {
     local url="$1"
-    python3 - "$ENV_FILE" "$url" <<'PYEOF'
+    "$PY" - "$ENV_FILE" "$url" <<'PYEOF'
 import sys, re
 path, url = sys.argv[1], sys.argv[2]
 try:
@@ -61,8 +69,17 @@ open(path, 'w').write(content)
 PYEOF
 }
 
-# ── Helper: local IP ──────────────────────────────────────────────────
+# ── Helper: local IP (Windows / Mac / Linux) ──────────────────────────
 local_ip() {
+    # Windows (Git Bash) — parse ipconfig output
+    if command -v ipconfig &>/dev/null && [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+        ipconfig 2>/dev/null \
+            | grep -A1 "Wireless\|Wi-Fi\|Ethernet" \
+            | grep "IPv4" \
+            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+            | grep -v "^127\." \
+            | head -1 && return
+    fi
     # macOS
     ipconfig getifaddr en0 2>/dev/null && return
     ipconfig getifaddr en1 2>/dev/null && return
@@ -74,18 +91,18 @@ local_ip() {
 # ── 1. Resolve SERVER_URL ─────────────────────────────────────────────
 info "Resolving public URL..."
 
-# Priority 1: Tailscale — truly permanent, no domain needed
+# Priority 1: Tailscale — permanent, set TAILSCALE_URL in .env once
 if [ -n "${TAILSCALE_URL:-}" ]; then
     SERVER_URL="$TAILSCALE_URL"
     ok "Tailscale (permanent): $SERVER_URL"
 
-# Priority 2: cloudflared quick tunnel (no admin needed, just needs cloudflared)
+# Priority 2: cloudflared quick tunnel
 elif command -v cloudflared &>/dev/null; then
     info "Starting Cloudflare Quick Tunnel..."
     TUNNEL_LOG="$(mktemp)"
     cloudflared tunnel --url "http://localhost:5002" --no-autoupdate \
         >"$TUNNEL_LOG" 2>&1 &
-    CF_PID=$!
+    TUNNEL_PID=$!
 
     for i in $(seq 1 30); do
         SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' \
@@ -99,23 +116,26 @@ elif command -v cloudflared &>/dev/null; then
     if [ -n "$SERVER_URL" ]; then
         ok "Cloudflare tunnel: $SERVER_URL"
     else
-        warn "Cloudflare URL not captured — falling back to SSH tunnel."
-        kill "$CF_PID" 2>/dev/null || true
-        CF_PID=""
+        warn "Cloudflare URL not captured — trying SSH tunnel."
+        kill "$TUNNEL_PID" 2>/dev/null || true
+        TUNNEL_PID=""
     fi
+fi
 
-# Priority 3: localhost.run SSH tunnel (no install, no admin — uses built-in SSH)
-elif command -v ssh &>/dev/null; then
+# Priority 3: localhost.run SSH tunnel — no install, no admin needed
+# Works with Windows built-in SSH or Git Bash SSH
+if [ -z "$SERVER_URL" ] && command -v ssh &>/dev/null; then
     info "Starting SSH tunnel via localhost.run (no admin required)..."
     TUNNEL_LOG="$(mktemp)"
     ssh -o StrictHostKeyChecking=no \
         -o ServerAliveInterval=30 \
+        -o ConnectTimeout=15 \
         -R "80:localhost:5002" \
         nokey@localhost.run \
         >"$TUNNEL_LOG" 2>&1 &
-    CF_PID=$!
+    TUNNEL_PID=$!
 
-    for i in $(seq 1 20); do
+    for i in $(seq 1 25); do
         SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.lhr\.life' \
             "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
         [ -n "$SERVER_URL" ] && break
@@ -127,20 +147,20 @@ elif command -v ssh &>/dev/null; then
     if [ -n "$SERVER_URL" ]; then
         ok "SSH tunnel (localhost.run): $SERVER_URL"
     else
-        warn "SSH tunnel URL not captured — falling back to local IP."
-        kill "$CF_PID" 2>/dev/null || true
-        CF_PID=""
+        warn "SSH tunnel failed — falling back to local IP."
+        kill "$TUNNEL_PID" 2>/dev/null || true
+        TUNNEL_PID=""
         SERVER_URL="http://$(local_ip):5002"
-        info "Local IP fallback: $SERVER_URL"
+        warn "Phone must be on the same Wi-Fi as this machine."
+        info "Local IP: $SERVER_URL"
     fi
+fi
 
-# Priority 4: local network IP (phone and PC must be on same Wi-Fi)
-else
-    warn "No tunnel available — using local IP."
-    warn "Phone must be on the same Wi-Fi as this machine."
-    warn "Find your IP with: ipconfig (Windows) or ifconfig (Mac/Linux)"
+# Priority 4: local IP fallback
+if [ -z "$SERVER_URL" ]; then
     SERVER_URL="http://$(local_ip):5002"
-    info "Local: $SERVER_URL"
+    warn "No tunnel available — using local IP: $SERVER_URL"
+    warn "Phone must be on the same Wi-Fi as this machine."
 fi
 
 save_server_url "$SERVER_URL"
@@ -150,39 +170,39 @@ export SERVER_URL
 echo ""
 info "Starting Flask server (app2.py)..."
 cd "$BACKEND"
-python3 app2.py &
+"$PY" app2.py &
 FLASK_PID=$!
 
-info "Waiting for Flask..."
+info "Waiting for Flask to be ready..."
 for i in $(seq 1 20); do
     curl -sf "http://localhost:5002/" >/dev/null 2>&1 && break || true
     sleep 1
 done
-ok "Flask is ready."
+ok "Flask is ready on port 5002."
 
 # ── 3. Inject into Chrome ─────────────────────────────────────────────
 echo ""
-info "Injecting 1Valet script into Chrome (tab 3 / 1Valet tab)..."
-python3 "$BACKEND/inject_tab.py" "$SERVER_URL" \
-    && ok "Script injected into Chrome automatically." \
-    || warn "Chrome injection failed — see above for the one-time setup command."
+info "Injecting 1Valet script into Chrome..."
+"$PY" "$BACKEND/inject_tab.py" "$SERVER_URL" \
+    && ok "Script injected into Chrome." \
+    || warn "Chrome injection failed. Start Chrome with --remote-debugging-port=9222 and retry."
 
 # ── Summary ───────────────────────────────────────────────────────────
 echo ""
-echo "══════════════════════════════════════════════════════════"
-printf "  📱  Phone upload URL : ${C_CYAN}%s${C_RESET}\n" "$SERVER_URL"
-printf "  🖥️   Admin panel      : ${C_CYAN}%s${C_RESET}\n" "$SERVER_URL"
+echo "============================================================"
+echo "  Phone upload URL : $SERVER_URL"
+echo "  Admin panel      : $SERVER_URL"
 echo "  Press Ctrl+C to stop all services"
-echo "══════════════════════════════════════════════════════════"
+echo "============================================================"
 echo ""
 
 # ── Cleanup on exit ───────────────────────────────────────────────────
 cleanup() {
     echo ""
     info "Shutting down..."
-    [ -n "$FLASK_PID" ] && kill "$FLASK_PID" 2>/dev/null || true
-    [ -n "$CF_PID"    ] && kill "$CF_PID"    2>/dev/null || true
-    [ -n "$TUNNEL_LOG" ] && rm -f "$TUNNEL_LOG" || true
+    [ -n "$FLASK_PID"   ] && kill "$FLASK_PID"   2>/dev/null || true
+    [ -n "$TUNNEL_PID"  ] && kill "$TUNNEL_PID"  2>/dev/null || true
+    [ -n "$TUNNEL_LOG"  ] && rm -f "$TUNNEL_LOG" 2>/dev/null || true
     ok "Stopped."
 }
 trap cleanup EXIT INT TERM
