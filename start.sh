@@ -36,10 +36,10 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 # ── Detect Python command (python3 on Mac/Linux, python on Windows) ───
-if command -v python3 &>/dev/null; then
-    PY="python3"
-elif command -v python &>/dev/null; then
+if command -v python &>/dev/null; then
     PY="python"
+elif command -v python3 &>/dev/null; then
+    PY="python3"
 else
     echo "  [!] Python not found. Activate your venv first."
     exit 1
