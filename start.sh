@@ -30,9 +30,12 @@ echo "  ParcelVision -- Starting up"
 echo "============================================================"
 echo ""
 
-# ── Load .env ─────────────────────────────────────────────────────────
+# ── Load .env (only valid KEY=VALUE lines — skip corrupt/garbage lines) ──
 if [ -f "$ENV_FILE" ]; then
-    set -a; source "$ENV_FILE"; set +a
+    while IFS='=' read -r key rest; do
+        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        export "$key=$rest"
+    done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" 2>/dev/null)
 fi
 
 # ── Detect Python command (python3 on Mac/Linux, python on Windows) ───
