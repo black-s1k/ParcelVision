@@ -1,20 +1,24 @@
+import os
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
+from dotenv import load_dotenv
 
-# 🔐 Connect to Google Sheets
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+CREDENTIALS_PATH = os.path.join(BASE_DIR, "credentials.json")
+SHEET_ID         = os.getenv("SHEET_ID",        "1kk26zI931UdarkoIgLES08YF4X2w5Y45-43_4aQD3bQ")
+WORKSHEET_NAME   = os.getenv("WORKSHEET_NAME",  "PACKAGES NEW")
+
+
 def connect_to_sheet():
     scope = [
         "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
+        "https://www.googleapis.com/auth/drive",
     ]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_PATH, scope)
     client = gspread.authorize(creds)
-
-    sheet_id = "1kk26zI931UdarkoIgLES08YF4X2w5Y45-43_4aQD3bQ"
-    worksheet_name = "PACKAGES NEW"
-    sheet = client.open_by_key(sheet_id).worksheet(worksheet_name)
-    return sheet  # ✅ Only the worksheet object, not a tuple
+    return client.open_by_key(SHEET_ID).worksheet(WORKSHEET_NAME)
 
 
 # ✅ Append a parcel entry inside the filtered table boundary
