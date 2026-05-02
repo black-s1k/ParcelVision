@@ -1,7 +1,12 @@
 flask
+flask-cors
+python-dotenv
 gspread
 oauth2client
 easyocr
 opencv-python
 pillow
 numpy
+requests
+pytesseract
+websocket-client
