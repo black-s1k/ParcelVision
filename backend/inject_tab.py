@@ -89,8 +89,19 @@ def _launch_chrome_with_debug():
         if plat == "Darwin":
             subprocess.Popen([
                 "open", "-a", "Google Chrome",
-                "--args", "--remote-debugging-port=9222",
+                "--args", f"--remote-debugging-port={CDP_PORT}",
             ])
+        elif plat == "Windows":
+            chrome_paths = [
+                os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+            ]
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    subprocess.Popen([path, f"--remote-debugging-port={CDP_PORT}"])
+                    return True
+            return False
         elif plat == "Linux":
             for exe in ("google-chrome", "google-chrome-stable", "chromium-browser", "chromium"):
                 try:
@@ -124,9 +135,16 @@ def main():
     if tabs is None:
         print(f"\n❌  Cannot reach Chrome on port {CDP_PORT}.")
         print("─" * 58)
-        print("Run Chrome once with the debug flag, then re-run start.sh:")
+        print("Chrome must be fully closed, then re-launched with the debug flag.")
+        print("")
+        print("  Windows — close ALL Chrome windows, then run in PowerShell/CMD:")
+        print(r'    & "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222')
+        print("")
         print("  macOS:  open -a 'Google Chrome' --args --remote-debugging-port=9222")
         print("  Linux:  google-chrome --remote-debugging-port=9222 &")
+        print("")
+        print("  ⚠️  If Chrome is already open you MUST close it fully first —")
+        print("      Chrome ignores the flag when another instance is running.")
         print("─" * 58)
         sys.exit(1)
 
