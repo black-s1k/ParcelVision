@@ -137,14 +137,17 @@
         console.log('='.repeat(60));
         console.log(`📡 Polling: ${SERVER_URL} (ngrok)`);
         console.log(`⏱️  Delivery interval: ${CONFIG.pollInterval/1000}s`);
-        console.log(`⏱️  Release interval:  ${CONFIG.pollInterval/1000}s`);
         console.log(`⚠️  Keep popup open!`);
         console.log('✋ Stop with: stopValetListener()');
         console.log('='.repeat(60) + '\n');
         state.pollTimer = setInterval(checkForPendingUnits, CONFIG.pollInterval);
-        state.releasePollTimer = setInterval(checkForReleases, CONFIG.pollInterval);
         checkForPendingUnits();
+    }
+    function startReleaseListener() {
+        if (state.releasePollTimer) return; // already running
+        state.releasePollTimer = setInterval(checkForReleases, CONFIG.pollInterval);
         checkForReleases();
+        console.log('🔔 Release listener active — watching for RELEASED checkbox events');
     }
     function stopListener() {
         if (!state.isRunning) { console.log('⚠️ Listener not running'); return; }
@@ -261,6 +264,7 @@
     function clearCache() { state.processedUnits.clear(); console.log('✅ Cleared processed units cache'); }
     window.startValetListener = startListener;
     window.stopValetListener = stopListener;
+    window.startReleaseListener = startReleaseListener;
     window.valetStatus = checkStatus;
     window.valetClearCache = clearCache;
     window.addUnit = addUnit;
@@ -269,23 +273,25 @@
 ║     1VALET AUTO-LISTENER - WORK PC SCRIPT (NGROK)          ║
 ╚════════════════════════════════════════════════════════════╝
 🎛️  CONTROLS:
-  startValetListener()  - Start auto-polling
+  startValetListener()  - Start delivery polling (needs ADD DELIVERY popup)
   stopValetListener()   - Stop
   valetStatus()         - Show status
 
 📝 SETUP CHECKLIST:
   ✅ Server URL set to: ${SERVER_URL}
-  ✅ Click "ADD DELIVERY" button
-  ✅ Keep popup open
-  ✅ Paste this script in console
+  ✅ Release listener started automatically
+  ✅ Click "ADD DELIVERY" button then startValetListener() for deliveries
 ⚠️  IMPORTANT: You must update the SERVER_URL in this script
     every time you restart the ngrok server on your Mac.
 ╔════════════════════════════════════════════════════════════╝
     `);
+    // Release listener starts immediately — no ADD DELIVERY popup needed
+    startReleaseListener();
+
     if (CONFIG.autoStart) {
-        console.log('🔄 Auto-starting in 3s (v8)... \n');
+        console.log('🔄 Auto-starting delivery listener in 3s (open ADD DELIVERY popup first)...\n');
         setTimeout(startListener, 3000);
     } else {
-        console.log('💡 Run startValetListener() to begin (v8)\n');
+        console.log('💡 Run startValetListener() to begin delivery polling\n');
     }
 })();
