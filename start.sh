@@ -31,7 +31,7 @@ echo ""
 # ── Load .env (only valid KEY=VALUE lines — skip corrupt/garbage lines) ──
 if [ -f "$ENV_FILE" ]; then
     while IFS='=' read -r key rest; do
-        [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+        [[  "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
         export "$key=$rest"
     done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" 2>/dev/null)
 fi
@@ -54,7 +54,7 @@ TUNNEL_PID=""
 TUNNEL_LOG="$SCRIPT_DIR/.tunnel.log"
 
 # ── Open Windows Firewall for port 5002 (silent no-op if rule exists) ─
-if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+if [[  "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     netsh advfirewall firewall add rule \
         name="ParcelVision Flask 5002" dir=in action=allow \
         protocol=TCP localport=5002 \
@@ -116,7 +116,7 @@ try_tunnel "serveo.net"    "serveo.net"    "serveo.net" \
 
 # ── Local IP (same-WiFi/Ethernet fallback) ────────────────────────────
 LOCAL_IP=""
-if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+if [[  "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     LOCAL_IP=$(ipconfig 2>/dev/null \
         | grep "IPv4" \
         | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
@@ -135,13 +135,23 @@ if [ -z "$SERVER_URL" ]; then
     fi
 fi
 
-# ── Update smartlockerscript.txt with the new public URL ──────────────
+# ── Update SERVER_URL in both scripts ────────────────────────────────
+URL_PATTERN='s|const SERVER_URL = "[^"]*";|const SERVER_URL = "'"${SERVER_URL}"'";|'
+
 SCRIPT_TXT="$BACKEND/smartlockerscript.txt"
 if [ -f "$SCRIPT_TXT" ]; then
-    sed -i "s|const SERVER_URL = \"[^\"]*\";|const SERVER_URL = \"${SERVER_URL}\";|" "$SCRIPT_TXT"
+    sed -i "$URL_PATTERN" "$SCRIPT_TXT"
     ok "smartlockerscript.txt updated with: $SERVER_URL"
 else
-    warn "smartlockerscript.txt not found — skipping update."
+    warn "smartlockerscript.txt not found — skipping."
+fi
+
+RELEASE_GS="$BACKEND/sheets_release_script.gs"
+if [ -f "$RELEASE_GS" ]; then
+    sed -i "$URL_PATTERN" "$RELEASE_GS"
+    ok "sheets_release_script.gs updated with: $SERVER_URL"
+else
+    warn "sheets_release_script.gs not found — skipping."
 fi
 
 # ── Banner ────────────────────────────────────────────────────────────

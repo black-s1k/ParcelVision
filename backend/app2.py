@@ -1,7 +1,4 @@
-"""
-app2.py - ParcelVision with Remote 1Valet Control
-(HTTP Version for NGROK)
-"""
+"""\napp2.py - ParcelVision with Remote 1Valet Control\n(HTTP Version for NGROK)\n"""
 
 from flask import Flask, request, jsonify, render_template
 
@@ -64,6 +61,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Queue to store units pending 1Valet addition
 pending_units_queue = []
+
+# Queue to store units pending retrieval (RELEASED checkbox ticked in Sheets)
+release_queue = []
 
 # Job results store for async upload processing
 job_results = {}
@@ -218,6 +218,30 @@ def clear_queue():
     count = len(pending_units_queue)
     pending_units_queue = []
     return jsonify({"status": "success", "message": f"Cleared {count} units from queue"})
+
+
+@app.route("/valet/release", methods=["POST"])
+def queue_release():
+    """Google Apps Script calls this when RELEASED checkbox is ticked in Sheets."""
+    global release_queue
+    data = request.get_json(silent=True) or {}
+    unit = str(data.get("unit", "")).strip().upper()
+    if not unit:
+        return jsonify({"error": "unit required"}), 400
+    release_queue.append({"unit": unit, "timestamp": datetime.now().strftime("%m/%d/%Y %H:%M:%S")})
+    print(f"Release queued for unit {unit}. Queue size: {len(release_queue)}")
+    return jsonify({"status": "queued", "unit": unit})
+
+
+@app.route("/valet/release-pending", methods=["GET"])
+def get_release_pending():
+    """Browser script polls this; returns and clears pending releases."""
+    global release_queue
+    if not release_queue:
+        return jsonify({"status": "empty", "units": []})
+    units = release_queue.copy()
+    release_queue = []
+    return jsonify({"status": "pending", "count": len(units), "units": units})
 
 
 if __name__ == "__main__":
