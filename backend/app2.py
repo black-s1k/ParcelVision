@@ -4,6 +4,7 @@ app2.py - ParcelVision with Remote 1Valet Control
 """
 
 from flask import Flask, request, jsonify, render_template
+from flask_socketio import SocketIO
 
 import os
 import sys
@@ -39,6 +40,7 @@ TEMPLATE_DIR = (
 )
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
+socketio = SocketIO(app, cors_allowed_origins="https://my.1valetbas.com", async_mode="threading")
 
 # Allow the 1Valet portal to call /valet/* from the browser
 CORS_ORIGIN = "https://my.1valetbas.com"
@@ -74,13 +76,14 @@ job_results = {}
 
 def _poll_sheet_releases():
     """
-    Background thread: every 30s scan the Google Sheet for rows where
+    Background thread: every 5s scan the Google Sheet for rows where
     column F (RELEASED checkbox) is TRUE and column G (released_time) is
-    still empty. Adds matching units to release_queue and writes the
-    notification timestamp to column G so they're not re-triggered.
+    still empty. Emits a WebSocket 'release_unit' event to all connected
+    browser clients instantly, and writes the timestamp to column G so
+    the row is never triggered twice.
     """
     import time
-    print("[ReleasePoller] Started — checking sheet every 30s for RELEASED rows")
+    print("[ReleasePoller] Started — checking sheet every 5s for RELEASED rows")
     while True:
         try:
             ws = connect_to_sheet()
@@ -96,12 +99,12 @@ def _poll_sheet_releases():
                     unit = str(row[1]).strip().upper()
                     if unit and unit not in ("", "UNKNOWN"):
                         ts = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
-                        release_queue.append({"unit": unit, "timestamp": ts})
                         ws.update_cell(i + 1, 7, ts)
-                        print(f"[ReleasePoller] Queued release for unit {unit}")
+                        socketio.emit("release_unit", {"unit": unit, "timestamp": ts})
+                        print(f"[ReleasePoller] Pushed release_unit event for unit {unit}")
         except Exception as e:
             print(f"[ReleasePoller] Error: {e}")
-        time.sleep(30)
+        time.sleep(5)
 
 
 threading.Thread(target=_poll_sheet_releases, daemon=True).start()
@@ -260,7 +263,7 @@ def clear_queue():
 
 @app.route("/valet/release-pending", methods=["GET"])
 def get_release_pending():
-    """Browser script polls this; returns and clears pending releases."""
+    """HTTP fallback — browser script uses WebSocket primarily."""
     global release_queue
     if not release_queue:
         return jsonify({"status": "empty", "units": []})
@@ -281,4 +284,4 @@ if __name__ == "__main__":
         print(f"Phone access: http://{local_ip}:5002\n")
     except Exception:
         pass
-    app.run(host="0.0.0.0", port=5002, debug=True)
+    socketio.run(app, host="0.0.0.0", port=5002, debug=True, use_reloader=False)

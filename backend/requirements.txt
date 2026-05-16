@@ -1,5 +1,6 @@
 flask
 flask-cors
+flask-socketio
 python-dotenv
 gspread
 oauth2client
