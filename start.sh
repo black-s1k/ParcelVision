@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
 # ParcelVision — one-command startup
-#   • Resolves a public SERVER_URL (Tailscale → cloudflared → serveo.net → localhost.run → local IP)
-#   • Starts Flask (app2.py)
-#   • Injects the 1Valet listener script into Chrome automatically
+#   • Starts Flask on port 5002
+#   • VS Code auto-forwards port 5002 — check the PORTS tab for the URL
+#   • Chrome injection is manual: run inject_tab.py <URL> or paste
+#     smartlockerscript.js into DevTools console on tab 3 (index 2)
 #
 # Usage (Git Bash on Windows):  ./start.sh
-#
-# One-time Chrome setup — run this once, then always launch Chrome the same way:
-#   Windows: Add --remote-debugging-port=9222 to your Chrome shortcut target, or run:
-#     "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -19,7 +16,7 @@ ENV_FILE="$BACKEND/.env"
 
 # ── Colours ───────────────────────────────────────────────────────────
 C_CYAN='\033[0;36m'; C_GREEN='\033[0;32m'
-C_YELLOW='\033[1;33m'; C_RED='\033[0;31m'; C_RESET='\033[0m'
+C_YELLOW='\033[1;33m'; C_RESET='\033[0m'
 info()  { echo -e "${C_CYAN}  $*${C_RESET}"; }
 ok()    { echo -e "${C_GREEN}  [OK] $*${C_RESET}"; }
 warn()  { echo -e "${C_YELLOW}  [!]  $*${C_RESET}"; }
@@ -38,7 +35,7 @@ if [ -f "$ENV_FILE" ]; then
     done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" 2>/dev/null)
 fi
 
-# ── Detect Python command (python3 on Mac/Linux, python on Windows) ───
+# ── Detect Python ─────────────────────────────────────────────────────
 VENV_PY="$SCRIPT_DIR/backend/venv/Scripts/python"
 if [ -f "$VENV_PY" ]; then
     PY="$VENV_PY"
@@ -51,167 +48,9 @@ else
     exit 1
 fi
 
-# ── Globals ───────────────────────────────────────────────────────────
-SERVER_URL=""
-TUNNEL_PID=""
 FLASK_PID=""
-TUNNEL_LOG=""
 
-# ── Helper: write SERVER_URL into .env ────────────────────────────────
-save_server_url() {
-    local url="$1"
-    "$PY" - "$ENV_FILE" "$url" <<'PYEOF'
-import sys, re
-path, url = sys.argv[1], sys.argv[2]
-try:
-    content = open(path, newline='').read().replace('\r\n', '\n').replace('\r', '\n')
-except FileNotFoundError:
-    content = ""
-if re.search(r'^SERVER_URL=', content, re.MULTILINE):
-    content = re.sub(r'^SERVER_URL=.*', f'SERVER_URL={url}', content, flags=re.MULTILINE)
-else:
-    content = content.rstrip('\n') + f'\nSERVER_URL={url}\n'
-open(path, 'w', newline='\n').write(content)
-PYEOF
-}
-
-# ── Helper: local IP (Windows / Mac / Linux) ──────────────────────────
-local_ip() {
-    local ip="" os
-    os="$(uname -s)"
-
-    # Windows (Git Bash / MINGW / CYGWIN)
-    if [[ "$os" == MINGW* || "$os" == CYGWIN* ]]; then
-        # grep directly for IPv4 lines — section header is several lines
-        # above the address so -A1 never reaches it
-        ip=$(ipconfig 2>/dev/null \
-            | grep "IPv4" \
-            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
-            | grep -v "^127\." \
-            | head -1 || true)
-        echo "${ip:-127.0.0.1}"
-        return
-    fi
-
-    # macOS
-    if [[ "$os" == Darwin* ]]; then
-        ip=$(ipconfig getifaddr en0 2>/dev/null || true)
-        [ -n "$ip" ] && echo "$ip" && return
-        ip=$(ipconfig getifaddr en1 2>/dev/null || true)
-        echo "${ip:-127.0.0.1}"
-        return
-    fi
-
-    # Linux / WSL
-    ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
-    echo "${ip:-127.0.0.1}"
-}
-
-# ── 1. Resolve SERVER_URL ─────────────────────────────────────────────
-info "Resolving public URL..."
-
-# Priority 1: Tailscale — permanent, set TAILSCALE_URL in .env once
-if [ -n "${TAILSCALE_URL:-}" ]; then
-    SERVER_URL="$TAILSCALE_URL"
-    ok "Tailscale (permanent): $SERVER_URL"
-
-# Priority 2: cloudflared quick tunnel
-elif command -v cloudflared &>/dev/null; then
-    info "Starting Cloudflare Quick Tunnel..."
-    TUNNEL_LOG="$(mktemp)"
-    cloudflared tunnel --url "http://localhost:5002" --no-autoupdate \
-        >"$TUNNEL_LOG" 2>&1 &
-    TUNNEL_PID=$!
-
-    for i in $(seq 1 30); do
-        SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' \
-            "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
-        [ -n "$SERVER_URL" ] && break
-        printf "  waiting... %ds\r" "$i"
-        sleep 1
-    done
-    echo ""
-
-    if [ -n "$SERVER_URL" ]; then
-        ok "Cloudflare tunnel: $SERVER_URL"
-    else
-        warn "Cloudflare URL not captured — trying SSH tunnel."
-        kill "$TUNNEL_PID" 2>/dev/null || true
-        TUNNEL_PID=""
-    fi
-fi
-
-# Priority 3: SSH tunnels (try serveo.net first, fall back to localhost.run)
-# Both need no install — serveo.net uses a different domain in case lhr.life is blocked
-if [ -z "$SERVER_URL" ] && command -v ssh &>/dev/null; then
-    info "Starting SSH tunnel via serveo.net..."
-    TUNNEL_LOG="$(mktemp)"
-    ssh -o StrictHostKeyChecking=no \
-        -o ServerAliveInterval=30 \
-        -o ConnectTimeout=15 \
-        -R "80:localhost:5002" \
-        serveo.net \
-        >"$TUNNEL_LOG" 2>&1 &
-    TUNNEL_PID=$!
-
-    for i in $(seq 1 20); do
-        SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.serveo\.net' \
-            "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
-        [ -n "$SERVER_URL" ] && break
-        printf "  waiting for serveo tunnel... %ds\r" "$i"
-        sleep 1
-    done
-    echo ""
-
-    if [ -n "$SERVER_URL" ]; then
-        ok "SSH tunnel (serveo.net): $SERVER_URL"
-    else
-        warn "serveo.net failed — trying localhost.run..."
-        kill "$TUNNEL_PID" 2>/dev/null || true
-        TUNNEL_PID=""
-
-        TUNNEL_LOG="$(mktemp)"
-        ssh -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ConnectTimeout=15 \
-            -R "80:localhost:5002" \
-            nokey@localhost.run \
-            >"$TUNNEL_LOG" 2>&1 &
-        TUNNEL_PID=$!
-
-        for i in $(seq 1 20); do
-            SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.lhr\.life' \
-                "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
-            [ -n "$SERVER_URL" ] && break
-            printf "  waiting for localhost.run tunnel... %ds\r" "$i"
-            sleep 1
-        done
-        echo ""
-
-        if [ -n "$SERVER_URL" ]; then
-            ok "SSH tunnel (localhost.run): $SERVER_URL"
-        else
-            warn "Both SSH tunnels failed — falling back to local IP."
-            kill "$TUNNEL_PID" 2>/dev/null || true
-            TUNNEL_PID=""
-            SERVER_URL="http://$(local_ip):5002"
-            warn "Phone must be on the same Wi-Fi as this machine."
-            info "Local IP: $SERVER_URL"
-        fi
-    fi
-fi
-
-# Priority 4: local IP fallback
-if [ -z "$SERVER_URL" ]; then
-    SERVER_URL="http://$(local_ip):5002"
-    warn "No tunnel available — using local IP: $SERVER_URL"
-    warn "Phone must be on the same Wi-Fi as this machine."
-fi
-
-save_server_url "$SERVER_URL"
-export SERVER_URL
-
-# ── 2. Open Windows Firewall for port 5002 (silent, no-op if already open) ──
+# ── Open Windows Firewall for port 5002 (silent no-op if rule exists) ─
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     netsh advfirewall firewall add rule \
         name="ParcelVision Flask 5002" dir=in action=allow \
@@ -219,9 +58,9 @@ if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
         >/dev/null 2>&1 || true
 fi
 
-# ── 3. Start Flask ────────────────────────────────────────────────────
+# ── Start Flask ───────────────────────────────────────────────────────
 echo ""
-info "Starting Flask server (app2.py)..."
+info "Starting Flask server (app2.py) on port 5002..."
 cd "$BACKEND"
 "$PY" app2.py &
 FLASK_PID=$!
@@ -233,19 +72,33 @@ for i in $(seq 1 20); do
 done
 ok "Flask is ready on port 5002."
 
-# ── 4. Inject into Chrome ─────────────────────────────────────────────
-echo ""
-info "Injecting 1Valet script into Chrome..."
-"$PY" "$BACKEND/inject_tab.py" "$SERVER_URL" \
-    && ok "Script injected into Chrome." \
-    || warn "Chrome injection failed. Start Chrome with --remote-debugging-port=9222 and retry."
+# ── Local IP (same-WiFi fallback) ─────────────────────────────────────
+LOCAL_IP=""
+if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+    LOCAL_IP=$(ipconfig 2>/dev/null \
+        | grep "IPv4" \
+        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+        | grep -v "^127\." \
+        | head -1 || true)
+fi
 
-# ── Summary ───────────────────────────────────────────────────────────
 echo ""
 echo "============================================================"
-echo "  Phone upload URL : $SERVER_URL"
-echo "  Admin panel      : $SERVER_URL"
-echo "  Press Ctrl+C to stop all services"
+echo "  Flask         : http://localhost:5002"
+if [ -n "$LOCAL_IP" ]; then
+echo "  Local network : http://$LOCAL_IP:5002"
+fi
+echo ""
+echo "  Phone URL ──> VS Code PORTS tab, port 5002"
+echo "                (VS Code auto-forwards to a public https URL)"
+echo ""
+echo "  Inject SmartLocker script manually:"
+echo "    Option A)  python backend/inject_tab.py <PORTS-URL>"
+echo "               targets tab 3 (index 2) or 1valetbas.com tab"
+echo "    Option B)  paste smartlockerscript.js into Chrome DevTools"
+echo "               console (replace __SERVER_URL__ with PORTS URL)"
+echo ""
+echo "  Press Ctrl+C to stop"
 echo "============================================================"
 echo ""
 
@@ -253,9 +106,7 @@ echo ""
 cleanup() {
     echo ""
     info "Shutting down..."
-    [ -n "$FLASK_PID"   ] && kill "$FLASK_PID"   2>/dev/null || true
-    [ -n "$TUNNEL_PID"  ] && kill "$TUNNEL_PID"  2>/dev/null || true
-    [ -n "$TUNNEL_LOG"  ] && rm -f "$TUNNEL_LOG" 2>/dev/null || true
+    [ -n "$FLASK_PID" ] && kill "$FLASK_PID" 2>/dev/null || true
     ok "Stopped."
 }
 trap cleanup EXIT INT TERM
