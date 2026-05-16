@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
 # ParcelVision — one-command startup
+#   • Creates SSH tunnel (serveo.net → localhost.run → local IP fallback)
+#   • Updates backend/smartlockerscript.txt with the new public URL
 #   • Starts Flask on port 5002
-#   • VS Code auto-forwards port 5002 — check the PORTS tab for the URL
-#   • Chrome injection is manual: run inject_tab.py <URL> or paste
-#     smartlockerscript.js into DevTools console on tab 3 (index 2)
+#   • Chrome injection is manual: paste smartlockerscript.txt into DevTools
+#     console on tab 3 (index 2) on the 1Valet SmartLocker page
 #
 # Usage (Git Bash on Windows):  ./start.sh
 # ─────────────────────────────────────────────────────────────────────
@@ -49,6 +50,8 @@ else
 fi
 
 FLASK_PID=""
+TUNNEL_PID=""
+TUNNEL_LOG="$SCRIPT_DIR/.tunnel.log"
 
 # ── Open Windows Firewall for port 5002 (silent no-op if rule exists) ─
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
@@ -72,7 +75,46 @@ for i in $(seq 1 20); do
 done
 ok "Flask is ready on port 5002."
 
-# ── Local IP (same-WiFi fallback) ─────────────────────────────────────
+# ── SSH Tunnel ────────────────────────────────────────────────────────
+SERVER_URL=""
+
+try_tunnel() {
+    local host="$1"
+    local user_arg="$2"
+    local label="$3"
+    info "Trying SSH tunnel via $label..."
+    > "$TUNNEL_LOG"
+    ssh -o StrictHostKeyChecking=no \
+        -o ConnectTimeout=10 \
+        -o ServerAliveInterval=30 \
+        -o ServerAliveCountMax=3 \
+        -R 80:localhost:5002 \
+        "$user_arg@$host" \
+        >"$TUNNEL_LOG" 2>&1 &
+    TUNNEL_PID=$!
+    local url=""
+    for i in $(seq 1 15); do
+        url=$(grep -oE 'https://[^[:space:]]+' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
+        if [ -n "$url" ]; then
+            SERVER_URL="$url"
+            ok "Tunnel active: $SERVER_URL"
+            return 0
+        fi
+        sleep 1
+    done
+    kill "$TUNNEL_PID" 2>/dev/null || true
+    TUNNEL_PID=""
+    warn "$label failed — no URL received within 15s."
+    return 1
+}
+
+# serveo.net requires no login (uses your SSH key for host identification only)
+# localhost.run: nokey@ for anonymous access
+try_tunnel "serveo.net"    "serveo.net"    "serveo.net" \
+    || try_tunnel "localhost.run" "nokey" "localhost.run" \
+    || true
+
+# ── Local IP (same-WiFi/Ethernet fallback) ────────────────────────────
 LOCAL_IP=""
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     LOCAL_IP=$(ipconfig 2>/dev/null \
@@ -82,6 +124,27 @@ if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
         | head -1 || true)
 fi
 
+if [ -z "$SERVER_URL" ]; then
+    if [ -n "$LOCAL_IP" ]; then
+        SERVER_URL="http://$LOCAL_IP:5002"
+        warn "No tunnel — using LAN IP: $SERVER_URL"
+        warn "Phone must be on the same network as this machine."
+    else
+        SERVER_URL="http://localhost:5002"
+        warn "No tunnel — using localhost only (phone upload won't work)."
+    fi
+fi
+
+# ── Update smartlockerscript.txt with the new public URL ──────────────
+SCRIPT_TXT="$BACKEND/smartlockerscript.txt"
+if [ -f "$SCRIPT_TXT" ]; then
+    sed -i "s|const SERVER_URL = \"[^\"]*\";|const SERVER_URL = \"${SERVER_URL}\";|" "$SCRIPT_TXT"
+    ok "smartlockerscript.txt updated with: $SERVER_URL"
+else
+    warn "smartlockerscript.txt not found — skipping update."
+fi
+
+# ── Banner ────────────────────────────────────────────────────────────
 echo ""
 echo "============================================================"
 echo "  Flask         : http://localhost:5002"
@@ -89,14 +152,13 @@ if [ -n "$LOCAL_IP" ]; then
 echo "  Local network : http://$LOCAL_IP:5002"
 fi
 echo ""
-echo "  Phone URL ──> VS Code PORTS tab, port 5002"
-echo "                (VS Code auto-forwards to a public https URL)"
+echo "  >>> PUBLIC URL (phone + SmartLocker script): <<<"
+echo "      $SERVER_URL"
 echo ""
-echo "  Inject SmartLocker script manually:"
-echo "    Option A)  python backend/inject_tab.py <PORTS-URL>"
-echo "               targets tab 3 (index 2) or 1valetbas.com tab"
-echo "    Option B)  paste smartlockerscript.js into Chrome DevTools"
-echo "               console (replace __SERVER_URL__ with PORTS URL)"
+echo "  smartlockerscript.txt has been updated with the above URL."
+echo "  To inject into Chrome (tab 3, index 2 on 1Valet page):"
+echo "    Option A)  python backend/inject_tab.py $SERVER_URL"
+echo "    Option B)  paste smartlockerscript.txt into Chrome DevTools console"
 echo ""
 echo "  Press Ctrl+C to stop"
 echo "============================================================"
@@ -106,7 +168,9 @@ echo ""
 cleanup() {
     echo ""
     info "Shutting down..."
-    [ -n "$FLASK_PID" ] && kill "$FLASK_PID" 2>/dev/null || true
+    [ -n "$FLASK_PID"  ] && kill "$FLASK_PID"  2>/dev/null || true
+    [ -n "$TUNNEL_PID" ] && kill "$TUNNEL_PID" 2>/dev/null || true
+    rm -f "$TUNNEL_LOG"
     ok "Stopped."
 }
 trap cleanup EXIT INT TERM
