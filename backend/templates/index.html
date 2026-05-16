@@ -3,168 +3,86 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ParcelVision Admin</title>
+  <title>Pad Envision</title>
   <style>
-    /* ── Base & Reset ─────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg-base:        #090d17;
-      --bg-grad-a:      #0d1526;
-      --bg-grad-b:      #060b14;
-      --glass-bg:       rgba(255,255,255,0.05);
-      --glass-border:   rgba(255,255,255,0.10);
-      --glass-bg-deep:  rgba(255,255,255,0.03);
-      --accent-blue:    #3b82f6;
-      --accent-purple:  #8b5cf6;
-      --accent-cyan:    #06b6d4;
-      --accent-green:   #10b981;
-      --accent-red:     #ef4444;
-      --accent-amber:   #f59e0b;
-      --text-primary:   #f1f5f9;
-      --text-secondary: #94a3b8;
-      --text-muted:     #475569;
-      --glow-blue:      0 0 24px rgba(59,130,246,0.35);
-      --glow-purple:    0 0 24px rgba(139,92,246,0.30);
-      --radius-card:    18px;
-      --radius-sm:      10px;
-      --blur:           blur(18px);
-      --transition:     0.25s cubic-bezier(0.4,0,0.2,1);
+      --bg:       #0e0e0e;
+      --surface:  #161616;
+      --border:   #2a2a2a;
+      --text:     #ffffff;
+      --text-2:   #888888;
+      --text-3:   #444444;
+      --green:    #22c55e;
+      --red:      #ef4444;
+      --blue:     #3b82f6;
+      --radius:   12px;
     }
 
     html { height: 100%; }
-
     body {
       min-height: 100vh;
-      background: radial-gradient(ellipse at 20% 10%, #0f2044 0%, var(--bg-grad-b) 60%),
-                  radial-gradient(ellipse at 80% 90%, #130d2b 0%, var(--bg-base) 60%);
-      background-attachment: fixed;
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-      color: var(--text-primary);
-      padding: 2rem 1rem 4rem;
-      overflow-x: hidden;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      color: var(--text);
+      padding: 2rem 1rem 5rem;
+      -webkit-font-smoothing: antialiased;
     }
 
-    /* ── Ambient orbs ─────────────────────────────────────────── */
-    .orb {
-      position: fixed;
-      border-radius: 50%;
-      filter: blur(90px);
-      opacity: 0.18;
-      pointer-events: none;
-      z-index: 0;
-    }
-    .orb-1 { width: 520px; height: 520px; background: #2563eb; top: -140px; left: -140px; }
-    .orb-2 { width: 400px; height: 400px; background: #7c3aed; bottom: -100px; right: -100px; }
-    .orb-3 { width: 260px; height: 260px; background: #0891b2; top: 45%; left: 55%; }
-
-    /* ── Layout ───────────────────────────────────────────────── */
     .page {
-      position: relative;
-      z-index: 1;
-      max-width: 680px;
+      max-width: 480px;
       margin: 0 auto;
       display: flex;
       flex-direction: column;
-      gap: 1.5rem;
+      gap: 1rem;
     }
 
-    /* ── Glass card base ──────────────────────────────────────── */
-    .card {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      border-radius: var(--radius-card);
-      backdrop-filter: var(--blur);
-      -webkit-backdrop-filter: var(--blur);
-      padding: 1.75rem;
-    }
-
-    /* ── Header ───────────────────────────────────────────────── */
+    /* ── Header ── */
     .header {
-      text-align: center;
-      padding: 2rem 1.75rem 1.5rem;
-    }
-    .header-icon {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 64px;
-      height: 64px;
-      border-radius: 18px;
-      background: linear-gradient(135deg, rgba(59,130,246,0.25), rgba(139,92,246,0.25));
-      border: 1px solid rgba(139,92,246,0.30);
-      font-size: 2rem;
-      margin-bottom: 1rem;
-      box-shadow: var(--glow-blue);
+      padding: 2rem 0 0.75rem;
     }
     .header h1 {
-      font-size: 1.75rem;
-      font-weight: 700;
+      font-size: 1.375rem;
+      font-weight: 600;
       letter-spacing: -0.02em;
-      background: linear-gradient(135deg, #e2e8f0, #94a3b8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+      color: var(--text);
     }
     .header p {
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-      margin-top: 0.4rem;
-    }
-    .badge-admin {
-      display: inline-block;
-      margin-top: 0.75rem;
-      padding: 0.25rem 0.75rem;
-      background: rgba(139,92,246,0.15);
-      border: 1px solid rgba(139,92,246,0.30);
-      border-radius: 999px;
-      font-size: 0.7rem;
-      font-weight: 600;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: #a78bfa;
+      color: var(--text-2);
+      font-size: 0.8125rem;
+      margin-top: 0.25rem;
     }
 
-    /* ── Upload zone ──────────────────────────────────────────── */
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+    }
+
+    /* ── Upload zone ── */
     .upload-zone {
-      border: 2px dashed rgba(59,130,246,0.30);
-      border-radius: var(--radius-card);
-      background: var(--glass-bg-deep);
-      padding: 2rem 1.5rem;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      background: transparent;
+      padding: 2rem 1rem;
       text-align: center;
       cursor: pointer;
-      transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+      transition: border-color 0.15s, background 0.15s;
       position: relative;
       overflow: hidden;
     }
     .upload-zone:hover {
-      border-color: rgba(59,130,246,0.60);
-      background: rgba(59,130,246,0.05);
-      box-shadow: var(--glow-blue);
+      border-color: #444;
+      background: rgba(255,255,255,0.02);
     }
     .upload-zone.has-file {
-      border-color: rgba(16,185,129,0.50);
-      background: rgba(16,185,129,0.04);
+      border-style: solid;
+      border-color: var(--green);
     }
-    .upload-icon {
-      font-size: 2.5rem;
-      margin-bottom: 0.75rem;
-      display: block;
-    }
-    .upload-zone label {
-      display: block;
-      cursor: pointer;
-    }
-    .upload-title {
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .upload-sub {
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      margin-top: 0.3rem;
-    }
+    .upload-zone label { display: block; cursor: pointer; }
     .upload-zone input[type="file"] {
       position: absolute;
       inset: 0;
@@ -174,238 +92,222 @@
       height: 100%;
     }
 
-    /* ── Preview ──────────────────────────────────────────────── */
+    .upload-icon-wrap {
+      margin-bottom: 0.75rem;
+      color: var(--text-2);
+    }
+    .upload-title {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--text);
+    }
+    .upload-sub {
+      font-size: 0.75rem;
+      color: var(--text-2);
+      margin-top: 0.25rem;
+    }
+
+    /* ── Preview ── */
     .preview-wrap {
       display: none;
-      border-radius: var(--radius-sm);
+      border-radius: 8px;
       overflow: hidden;
-      border: 1px solid var(--glass-border);
+      border: 1px solid var(--border);
       margin-top: 1rem;
       position: relative;
     }
     .preview-wrap img {
       width: 100%;
-      max-height: 280px;
+      max-height: 240px;
       object-fit: cover;
       display: block;
     }
     .preview-overlay {
       position: absolute;
       inset: 0;
-      background: linear-gradient(to bottom, transparent 60%, rgba(0,0,0,0.55));
+      background: linear-gradient(to bottom, transparent 55%, rgba(0,0,0,0.55));
     }
     .preview-filename {
       position: absolute;
-      bottom: 0.6rem;
+      bottom: 0.5rem;
       left: 0.75rem;
       right: 0.75rem;
-      font-size: 0.72rem;
-      color: rgba(255,255,255,0.7);
+      font-size: 0.68rem;
+      color: rgba(255,255,255,0.55);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    /* ── Submit button ────────────────────────────────────────── */
-    .btn-submit {
+    /* ── Buttons ── */
+    .btn {
       width: 100%;
-      padding: 0.85rem 1.5rem;
+      padding: 0.875rem 1.5rem;
       border: none;
-      border-radius: var(--radius-sm);
-      background: linear-gradient(135deg, #2563eb, #7c3aed);
-      color: #fff;
-      font-size: 1rem;
-      font-weight: 600;
-      letter-spacing: 0.02em;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
       cursor: pointer;
-      transition: opacity var(--transition), transform var(--transition), box-shadow var(--transition);
-      box-shadow: 0 4px 20px rgba(37,99,235,0.35);
-      margin-top: 1.25rem;
+      transition: opacity 0.15s, background 0.15s;
+      margin-top: 0.875rem;
+      letter-spacing: 0.01em;
     }
-    .btn-submit:hover:not(:disabled) {
-      opacity: 0.92;
-      transform: translateY(-1px);
-      box-shadow: 0 6px 28px rgba(37,99,235,0.50);
+    .btn-primary {
+      background: #ffffff;
+      color: #000000;
     }
-    .btn-submit:active:not(:disabled) { transform: translateY(0); }
-    .btn-submit:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      transform: none;
+    .btn-primary:hover:not(:disabled) { background: #e5e5e5; }
+    .btn-primary:active:not(:disabled) { background: #d4d4d4; }
+    .btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-2);
+      border: 1px solid var(--border);
     }
+    .btn-secondary:hover { background: rgba(255,255,255,0.04); color: var(--text); border-color: #444; }
 
-    /* ── Status bar ───────────────────────────────────────────── */
+    /* ── Status bar ── */
     .status-bar {
       display: none;
       align-items: center;
-      gap: 0.6rem;
-      padding: 0.85rem 1.1rem;
-      border-radius: var(--radius-sm);
-      font-size: 0.88rem;
-      font-weight: 500;
+      gap: 0.5rem;
+      padding: 0.75rem 0.875rem;
+      border-radius: 8px;
+      font-size: 0.8125rem;
       border: 1px solid transparent;
+      margin-top: 0.75rem;
     }
-    .status-bar.info    { background: rgba(59,130,246,0.12);  border-color: rgba(59,130,246,0.25);  color: #93c5fd; }
-    .status-bar.success { background: rgba(16,185,129,0.12);  border-color: rgba(16,185,129,0.25);  color: #6ee7b7; }
-    .status-bar.error   { background: rgba(239,68,68,0.12);   border-color: rgba(239,68,68,0.25);   color: #fca5a5; }
+    .status-bar.info    { background: rgba(59,130,246,0.08);  border-color: rgba(59,130,246,0.18); color: #93c5fd; }
+    .status-bar.success { background: rgba(34,197,94,0.08);   border-color: rgba(34,197,94,0.18);  color: #86efac; }
+    .status-bar.error   { background: rgba(239,68,68,0.08);   border-color: rgba(239,68,68,0.18);  color: #fca5a5; }
     .status-bar.show    { display: flex; }
 
-    /* ── Spinner ──────────────────────────────────────────────── */
+    /* ── Spinner ── */
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner {
-      width: 16px; height: 16px;
-      border: 2px solid rgba(255,255,255,0.2);
-      border-top-color: #fff;
+      width: 13px; height: 13px;
+      border: 1.5px solid rgba(147,197,253,0.2);
+      border-top-color: #93c5fd;
       border-radius: 50%;
-      animation: spin 0.7s linear infinite;
+      animation: spin 0.65s linear infinite;
       flex-shrink: 0;
     }
 
-    /* ── Results card ─────────────────────────────────────────── */
-    .result-card {
-      display: none;
-    }
+    /* ── Result card ── */
+    .result-card { display: none; }
     .result-card.show { display: block; }
 
     .result-header {
       display: flex;
       align-items: center;
-      gap: 0.6rem;
-      margin-bottom: 1.25rem;
-      padding-bottom: 1rem;
-      border-bottom: 1px solid var(--glass-border);
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.875rem;
+      border-bottom: 1px solid var(--border);
     }
     .result-header h3 {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--text-primary);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-2);
     }
-    .result-header .dot {
-      width: 8px; height: 8px;
+    .dot {
+      width: 6px; height: 6px;
       border-radius: 50%;
-      background: var(--accent-green);
-      box-shadow: 0 0 8px var(--accent-green);
+      background: var(--green);
       flex-shrink: 0;
     }
-    .result-header .saved-name {
+    .saved-name {
       margin-left: auto;
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      max-width: 200px;
+      font-size: 0.65rem;
+      color: var(--text-3);
+      max-width: 160px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    /* ── Meta grid ────────────────────────────────────────────── */
+    /* ── Meta grid ── */
     .meta-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0.85rem;
+      gap: 0.625rem;
     }
-    @media (max-width: 400px) { .meta-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 360px) { .meta-grid { grid-template-columns: 1fr; } }
 
     .meta-tile {
-      background: var(--glass-bg-deep);
-      border: 1px solid var(--glass-border);
-      border-radius: var(--radius-sm);
-      padding: 1rem 1.1rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.3rem;
-      transition: border-color var(--transition), background var(--transition);
-    }
-    .meta-tile:hover {
-      background: rgba(255,255,255,0.05);
-      border-color: rgba(255,255,255,0.16);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.875rem;
     }
     .meta-label {
-      font-size: 0.68rem;
-      font-weight: 600;
-      letter-spacing: 0.1em;
+      font-size: 0.65rem;
+      font-weight: 500;
+      letter-spacing: 0.07em;
       text-transform: uppercase;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 0.35rem;
+      color: var(--text-3);
+      margin-bottom: 0.3rem;
     }
     .meta-value {
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: var(--text-primary);
-      line-height: 1.2;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.25;
     }
+    .tile-name .meta-value { font-size: 0.875rem; }
 
-    /* Per-field accent colours */
-    .tile-unit   .meta-label { color: #7dd3fc; }
-    .tile-unit   .meta-value { color: #bfdbfe; }
-    .tile-name   .meta-label { color: #c4b5fd; }
-    .tile-name   .meta-value { color: #ddd6fe; font-size: 1rem; }
-    .tile-supplier .meta-label { color: #6ee7b7; }
-    .tile-type   .meta-label { color: #fcd34d; }
-
-    /* ── Supplier badge ───────────────────────────────────────── */
+    /* ── Supplier badge ── */
     .supplier-badge {
       display: inline-block;
-      padding: 0.25rem 0.65rem;
-      border-radius: 6px;
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
     }
 
-    /* ── Divider ──────────────────────────────────────────────── */
-    .divider {
-      height: 1px;
-      background: var(--glass-border);
-      margin: 0.5rem 0;
-    }
-
-    /* ── Footer ───────────────────────────────────────────────── */
+    /* ── Footer ── */
     .footer {
       text-align: center;
-      padding: 0.5rem;
-      font-size: 0.72rem;
-      color: var(--text-muted);
+      padding: 0.75rem 0;
+      font-size: 0.68rem;
+      color: var(--text-3);
     }
 
-    /* ── Pulse animation for the dot ─────────────────────────── */
-    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.6;transform:scale(1.3)} }
-    .dot-pulse { animation: pulse 1.8s ease-in-out infinite; }
-
-    /* ── Slide-in animation ───────────────────────────────────── */
+    /* ── Slide-in ── */
     @keyframes slideUp {
-      from { opacity: 0; transform: translateY(14px); }
+      from { opacity: 0; transform: translateY(8px); }
       to   { opacity: 1; transform: translateY(0); }
     }
-    .slide-up { animation: slideUp 0.35s ease forwards; }
+    .slide-up { animation: slideUp 0.28s ease forwards; }
   </style>
 </head>
 <body>
 
-  <!-- Ambient background orbs -->
-  <div class="orb orb-1"></div>
-  <div class="orb orb-2"></div>
-  <div class="orb orb-3"></div>
-
   <div class="page">
 
-    <!-- ── Header card ──────────────────────────────────────── -->
-    <div class="card header">
-      <div class="header-icon">📦</div>
+    <!-- Header -->
+    <div class="header">
       <h1>ParcelVision</h1>
-      <p>AI-powered parcel logging for concierge &amp; front desk</p>
-      <span class="badge-admin">Admin Console</span>
+      <p>Parcel logging for concierge &amp; front desk</p>
     </div>
 
-    <!-- ── Upload card ───────────────────────────────────────── -->
+    <!-- Upload card -->
     <div class="card" id="uploadCard">
 
       <div class="upload-zone" id="uploadZone">
         <label for="fileInput">
-          <span class="upload-icon" id="uploadIcon">📷</span>
-          <span class="upload-title" id="uploadTitle">Capture or Upload Label</span>
-          <span class="upload-sub" id="uploadSub">Tap to open camera · or drop an image here</span>
+          <div class="upload-icon-wrap" id="uploadIconWrap">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="1.5"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+          <div class="upload-title" id="uploadTitle">Capture or Upload Label</div>
+          <div class="upload-sub" id="uploadSub">Tap to open camera &middot; or drop an image here</div>
         </label>
         <input type="file" id="fileInput" name="file" accept="image/*" capture="environment" />
       </div>
@@ -416,65 +318,85 @@
         <div class="preview-filename" id="previewFilename"></div>
       </div>
 
-      <button class="btn-submit" id="submitBtn" disabled>Analyse &amp; Log Parcel</button>
+      <button class="btn btn-primary" id="submitBtn" disabled>Analyse &amp; Log Parcel</button>
 
       <div class="status-bar" id="statusBar">
         <span id="statusIcon"></span>
         <span id="statusText"></span>
       </div>
+
     </div>
 
-    <!-- ── Results card ──────────────────────────────────────── -->
+    <!-- Result card -->
     <div class="card result-card" id="resultCard">
       <div class="result-header">
-        <div class="dot dot-pulse"></div>
+        <div class="dot"></div>
         <h3>Extraction Result</h3>
         <span class="saved-name" id="savedName"></span>
       </div>
-
-      <div class="meta-grid" id="metaGrid">
-        <!-- populated by JS -->
-      </div>
+      <div class="meta-grid" id="metaGrid"></div>
+      <button class="btn btn-secondary" id="uploadMoreBtn">Upload More</button>
     </div>
 
-    <!-- ── Footer ────────────────────────────────────────────── -->
-    <div class="footer">ParcelVision &copy; 2025 &nbsp;·&nbsp; Powered by Gemini Vision</div>
+    <!-- Footer -->
+    <div class="footer">Pad Envision &copy; 2026</div>
 
   </div>
 
   <script>
-    /* ── DOM refs ─────────────────────────────────────────────── */
-    const fileInput   = document.getElementById("fileInput");
-    const uploadZone  = document.getElementById("uploadZone");
-    const uploadIcon  = document.getElementById("uploadIcon");
-    const uploadTitle = document.getElementById("uploadTitle");
-    const uploadSub   = document.getElementById("uploadSub");
-    const previewWrap = document.getElementById("previewWrap");
-    const preview     = document.getElementById("preview");
+    /* ── DOM refs ── */
+    const fileInput       = document.getElementById("fileInput");
+    const uploadZone      = document.getElementById("uploadZone");
+    const uploadIconWrap  = document.getElementById("uploadIconWrap");
+    const uploadTitle     = document.getElementById("uploadTitle");
+    const uploadSub       = document.getElementById("uploadSub");
+    const previewWrap     = document.getElementById("previewWrap");
+    const preview         = document.getElementById("preview");
     const previewFilename = document.getElementById("previewFilename");
-    const submitBtn   = document.getElementById("submitBtn");
-    const statusBar   = document.getElementById("statusBar");
-    const statusIcon  = document.getElementById("statusIcon");
-    const statusText  = document.getElementById("statusText");
-    const resultCard  = document.getElementById("resultCard");
-    const metaGrid    = document.getElementById("metaGrid");
-    const savedName   = document.getElementById("savedName");
+    const submitBtn       = document.getElementById("submitBtn");
+    const statusBar       = document.getElementById("statusBar");
+    const statusIcon      = document.getElementById("statusIcon");
+    const statusText      = document.getElementById("statusText");
+    const resultCard      = document.getElementById("resultCard");
+    const metaGrid        = document.getElementById("metaGrid");
+    const savedName       = document.getElementById("savedName");
+    const uploadMoreBtn   = document.getElementById("uploadMoreBtn");
 
-    /* ── Status helper ────────────────────────────────────────── */
+    const UPLOAD_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>`;
+
+    /* ── Status helper ── */
     function setStatus(type, icon, msg) {
       statusBar.className = "status-bar show " + type;
       statusIcon.innerHTML = icon;
       statusText.textContent = msg;
     }
-    function clearStatus() {
-      statusBar.className = "status-bar";
-    }
+    function clearStatus() { statusBar.className = "status-bar"; }
 
-    /* ── File selected ────────────────────────────────────────── */
+    /* ── Reset to initial state ── */
+    function resetUpload() {
+      fileInput.value = "";
+      uploadZone.classList.remove("has-file");
+      uploadIconWrap.innerHTML = UPLOAD_SVG;
+      uploadTitle.textContent = "Capture or Upload Label";
+      uploadSub.textContent = "Tap to open camera · or drop an image here";
+      previewWrap.style.display = "none";
+      preview.src = "";
+      submitBtn.disabled = true;
+      resultCard.classList.remove("show");
+      clearStatus();
+    }
+    uploadMoreBtn.addEventListener("click", resetUpload);
+
+    /* ── File selected ── */
     fileInput.addEventListener("change", () => {
       const file = fileInput.files[0];
       if (!file) return;
-
       const reader = new FileReader();
       reader.onload = e => {
         preview.src = e.target.result;
@@ -482,19 +404,18 @@
         previewFilename.textContent = file.name;
       };
       reader.readAsDataURL(file);
-
       uploadZone.classList.add("has-file");
-      uploadIcon.textContent = "✅";
+      uploadIconWrap.textContent = "✅";
       uploadTitle.textContent = file.name;
-      uploadSub.textContent   = (file.size / 1024).toFixed(1) + " KB · ready to upload";
+      uploadSub.textContent = (file.size / 1024).toFixed(1) + " KB · ready to upload";
       submitBtn.disabled = false;
       resultCard.classList.remove("show");
       clearStatus();
     });
 
-    /* ── Drag-and-drop ────────────────────────────────────────── */
+    /* ── Drag-and-drop ── */
     ["dragover","dragenter"].forEach(evt =>
-      uploadZone.addEventListener(evt, e => { e.preventDefault(); uploadZone.style.borderColor = "rgba(59,130,246,0.7)"; })
+      uploadZone.addEventListener(evt, e => { e.preventDefault(); uploadZone.style.borderColor = "#555"; })
     );
     ["dragleave","drop"].forEach(evt =>
       uploadZone.addEventListener(evt, () => { uploadZone.style.borderColor = ""; })
@@ -508,78 +429,82 @@
       }
     });
 
-    /* ── Supplier colour map ──────────────────────────────────── */
+    /* ── Image compression (max 1600px / 900 KB) ── */
+    function compressImage(file) {
+      return new Promise(function(resolve) {
+        const MAX_PX = 1600, MAX_BYTES = 900 * 1024;
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement("canvas");
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if (w > MAX_PX || h > MAX_PX) {
+            if (w >= h) { h = Math.round(h * MAX_PX / w); w = MAX_PX; }
+            else        { w = Math.round(w * MAX_PX / h); h = MAX_PX; }
+          }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          canvas.toBlob(function(blob) {
+            if (blob && blob.size <= MAX_BYTES) { resolve(blob); return; }
+            canvas.toBlob(function(b2) { resolve(b2 || blob); }, "image/jpeg", 0.70);
+          }, "image/jpeg", 0.85);
+        };
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    /* ── Supplier badge colours ── */
     const SUPPLIER_STYLES = {
-      AMAZON:      { bg: "rgba(255,153,0,0.15)",  border: "rgba(255,153,0,0.4)",  color: "#fbbf24" },
-      UPS:         { bg: "rgba(93,62,0,0.25)",    border: "rgba(173,116,0,0.4)",  color: "#d97706" },
-      FEDEX:       { bg: "rgba(72,11,253,0.15)",  border: "rgba(99,102,241,0.4)", color: "#818cf8" },
-      DHL:         { bg: "rgba(255,204,0,0.10)",  border: "rgba(255,204,0,0.35)", color: "#eab308" },
-      PUROLATOR:   { bg: "rgba(239,68,68,0.10)",  border: "rgba(239,68,68,0.35)", color: "#f87171" },
-      "CANADA POST": { bg:"rgba(239,68,68,0.10)", border:"rgba(239,68,68,0.35)",  color: "#f87171" },
-      CANPAR:      { bg: "rgba(249,115,22,0.10)", border: "rgba(249,115,22,0.35)",color: "#fb923c" },
-      INTELCOM:    { bg: "rgba(6,182,212,0.10)",  border: "rgba(6,182,212,0.35)", color: "#22d3ee" },
-      DEFAULT:     { bg: "rgba(148,163,184,0.10)",border: "rgba(148,163,184,0.3)",color: "#94a3b8" },
+      AMAZON:        { bg:"rgba(255,153,0,0.1)",  border:"rgba(255,153,0,0.25)",  color:"#fbbf24" },
+      UPS:           { bg:"rgba(93,62,0,0.18)",   border:"rgba(173,116,0,0.3)",   color:"#d97706" },
+      FEDEX:         { bg:"rgba(72,11,253,0.1)",  border:"rgba(99,102,241,0.3)",  color:"#818cf8" },
+      DHL:           { bg:"rgba(255,204,0,0.07)", border:"rgba(255,204,0,0.25)",  color:"#eab308" },
+      PUROLATOR:     { bg:"rgba(239,68,68,0.07)", border:"rgba(239,68,68,0.25)",  color:"#f87171" },
+      "CANADA POST": { bg:"rgba(239,68,68,0.07)", border:"rgba(239,68,68,0.25)",  color:"#f87171" },
+      CANPAR:        { bg:"rgba(249,115,22,0.07)",border:"rgba(249,115,22,0.25)", color:"#fb923c" },
+      INTELCOM:      { bg:"rgba(6,182,212,0.07)", border:"rgba(6,182,212,0.25)",  color:"#22d3ee" },
+      DEFAULT:       { bg:"rgba(255,255,255,0.05)",border:"rgba(255,255,255,0.12)",color:"#888888" },
     };
 
     function supplierBadgeHTML(supplier) {
       const s = SUPPLIER_STYLES[supplier] || SUPPLIER_STYLES.DEFAULT;
-      return `<span class="supplier-badge" style="
-        background:${s.bg};border:1px solid ${s.border};color:${s.color}
-      ">${supplier}</span>`;
+      return `<span class="supplier-badge"
+        style="background:${s.bg};border:1px solid ${s.border};color:${s.color}"
+      >${supplier}</span>`;
     }
 
-    /* ── Build result tiles ───────────────────────────────────── */
+    /* ── Build result tiles ── */
     function buildMeta(data) {
       const tiles = [
-        {
-          cls: "tile-unit",
-          icon: "🏠",
-          label: "Unit",
-          value: `<span style="color:#bfdbfe">${data.unit || "—"}</span>`,
-        },
-        {
-          cls: "tile-name",
-          icon: "👤",
-          label: "Recipient",
-          value: data.name || "—",
-        },
-        {
-          cls: "tile-supplier",
-          icon: "🚚",
-          label: "Courier",
-          value: supplierBadgeHTML(data.supplier || "OTHER"),
-        },
-        {
-          cls: "tile-type",
-          icon: "📦",
-          label: "Parcel Type",
-          value: data.parcel_type || "—",
-        },
+        { cls:"tile-unit",     label:"Unit",        value: data.unit || "—" },
+        { cls:"tile-name",     label:"Recipient",   value: data.name || "—" },
+        { cls:"tile-supplier", label:"Courier",     value: supplierBadgeHTML(data.supplier || "OTHER") },
+        { cls:"tile-type",     label:"Parcel Type", value: data.parcel_type || "—" },
       ];
-
       metaGrid.innerHTML = tiles.map(t => `
         <div class="meta-tile ${t.cls}">
-          <div class="meta-label">${t.icon} ${t.label}</div>
+          <div class="meta-label">${t.label}</div>
           <div class="meta-value">${t.value}</div>
         </div>
       `).join("");
     }
 
-    /* ── Submit ───────────────────────────────────────────────── */
+    /* ── Submit ── */
     submitBtn.addEventListener("click", async () => {
       const file = fileInput.files[0];
       if (!file) return;
-
       submitBtn.disabled = true;
       resultCard.classList.remove("show");
-      setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label…");
-
-      const formData = new FormData();
-      formData.append("file", file);
+      setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label...");
 
       try {
-        const res  = await fetch("/upload", { method: "POST", body: formData });
-        const body = await res.json();
+        const blob = await compressImage(file);
+        const formData = new FormData();
+        formData.append("file", blob, "image.jpg");
+
+        const res = await fetch("/upload", { method: "POST", body: formData });
+        let body;
+        try { body = await res.json(); }
+        catch (e) { throw new Error("Server returned an unexpected response — check tunnel or server logs."); }
 
         if (body.status === "success") {
           setStatus("success", "✅", body.message || "Parcel logged successfully.");
@@ -587,10 +512,10 @@
           buildMeta(body.data || {});
           resultCard.classList.add("show", "slide-up");
         } else {
-          setStatus("error", "⚠️", body.error || "Upload failed.");
+          setStatus("error", "!", body.error || "Upload failed.");
         }
       } catch (err) {
-        setStatus("error", "❌", "Network error: " + err.message);
+        setStatus("error", "!", "Network error: " + err.message);
       } finally {
         submitBtn.disabled = false;
       }
