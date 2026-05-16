@@ -4,7 +4,6 @@ app2.py - ParcelVision with Remote 1Valet Control
 """
 
 from flask import Flask, request, jsonify, render_template
-from flask_cors import CORS
 
 import os
 import sys
@@ -39,13 +38,22 @@ TEMPLATE_DIR = (
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
 
-# === Full CORS Configuration ===
-CORS(app, resources={
-    r"/valet/*": {
-        "origins": "https://my.1valetbas.com",
-        "allow_headers": ["Content-Type", "ngrok-skip-browser-warning"]
-    }
-})
+# Allow the 1Valet portal to call /valet/* from the browser
+CORS_ORIGIN = "https://my.1valetbas.com"
+
+@app.after_request
+def apply_cors(response):
+    origin = request.headers.get("Origin", "")
+    if origin == CORS_ORIGIN:
+        response.headers["Access-Control-Allow-Origin"]  = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, ngrok-skip-browser-warning"
+        response.headers["Access-Control-Max-Age"]       = "600"
+    return response
+
+@app.route("/valet/<path:subpath>", methods=["OPTIONS"])
+def valet_preflight(subpath):
+    return "", 204
 
 # ===============================
 
