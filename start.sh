@@ -135,13 +135,23 @@ if [ -z "$SERVER_URL" ]; then
     fi
 fi
 
-# ── Update smartlockerscript.txt with the new public URL ──────────────
+# ── Update SERVER_URL in both scripts ────────────────────────────────
+URL_PATTERN='s|const SERVER_URL = "[^"]*";|const SERVER_URL = "'"${SERVER_URL}"'";|'
+
 SCRIPT_TXT="$BACKEND/smartlockerscript.txt"
 if [ -f "$SCRIPT_TXT" ]; then
-    sed -i "s|const SERVER_URL = \"[^\"]*\";|const SERVER_URL = \"${SERVER_URL}\";|" "$SCRIPT_TXT"
+    sed -i "$URL_PATTERN" "$SCRIPT_TXT"
     ok "smartlockerscript.txt updated with: $SERVER_URL"
 else
-    warn "smartlockerscript.txt not found — skipping update."
+    warn "smartlockerscript.txt not found — skipping."
+fi
+
+RELEASE_GS="$BACKEND/sheets_release_script.gs"
+if [ -f "$RELEASE_GS" ]; then
+    sed -i "$URL_PATTERN" "$RELEASE_GS"
+    ok "sheets_release_script.gs updated with: $SERVER_URL"
+else
+    warn "sheets_release_script.gs not found — skipping."
 fi
 
 # ── Banner ────────────────────────────────────────────────────────────
