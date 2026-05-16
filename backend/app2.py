@@ -10,6 +10,8 @@ import sys
 import inspect
 import traceback
 import json
+import threading
+import uuid
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -24,7 +26,7 @@ if current_dir not in sys.path:
 from vision_utils import analyze_parcel
 from sheet_utils import append_row
 
-print("🔍 Loaded modules:")
+print("Loaded modules:")
 print(f"  - vision_utils from: {inspect.getfile(analyze_parcel)}")
 print(f"  - sheet_utils from: {inspect.getfile(append_row)}")
 
@@ -63,6 +65,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Queue to store units pending 1Valet addition
 pending_units_queue = []
 
+# Job results store for async upload processing
+job_results = {}
+
 
 # ============================================================
 # ROUTES
@@ -80,7 +85,9 @@ def home():
 @app.route("/upload", methods=["POST"])
 def upload_parcel():
     """
-    Complete workflow: OCR → Google Sheets → Queue for 1Valet
+    Saves the image and immediately returns a job_id.
+    Processing (OCR + Sheets + queue) runs in a background thread.
+    The phone polls /result/<job_id> for the outcome.
     """
     try:
         if "file" not in request.files:
@@ -90,200 +97,139 @@ def upload_parcel():
         if file.filename == "":
             return jsonify({"error": "No selected file"}), 400
 
-        # Save temp file
-        temp_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        # Save to a unique temp path so concurrent uploads don't collide
+        job_id = uuid.uuid4().hex
+        temp_path = os.path.join(UPLOAD_FOLDER, f"tmp_{job_id}.jpg")
         file.save(temp_path)
 
-        print("\n" + "="*60)
-        print("📸 STEP 1: EXTRACTING PARCEL DATA")
-        print("="*60)
-        
-        # Extract data using OCR
-        result = analyze_parcel(temp_path)
-        
-        if isinstance(result, list):
-            result = result[0] if result else {}
+        job_results[job_id] = {"status": "processing"}
 
-        unit = str(result.get("unit", "UNKNOWN")).strip().upper()
-        name = str(result.get("name", "UNKNOWN")).strip().upper()
-        supplier = str(result.get("supplier", "OTHER")).strip().upper()
-        parcel_type = str(result.get("parcel_type", "BROWN BOX")).strip().upper()
-        
-        print(f"  📍 Unit:        {unit}")
-        print(f"  👤 Name:        {name}")
-        print(f"  🚚 Supplier:    {supplier}")
-        print(f"  📦 Type:        {parcel_type}")
+        def process(job_id, temp_path):
+            try:
+                print(f"\n[{job_id}] OCR start")
+                result = analyze_parcel(temp_path)
+                if isinstance(result, list):
+                    result = result[0] if result else {}
 
-        # Step 2: Save to Google Sheets
-        print("\n" + "="*60)
-        print("📊 STEP 2: SAVING TO GOOGLE SHEETS")
-        print("="*60)
-        
-        timestamp_readable = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
-        timestamp_safe = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                unit         = str(result.get("unit",        "UNKNOWN")).strip().upper()
+                name         = str(result.get("name",        "UNKNOWN")).strip().upper()
+                supplier     = str(result.get("supplier",    "OTHER")).strip().upper()
+                parcel_type  = str(result.get("parcel_type", "BROWN BOX")).strip().upper()
 
-        row = [timestamp_readable, unit, name, supplier, parcel_type, "", ""]
-        append_row(row)
-        print("✅ Saved to Google Sheets")
+                print(f"[{job_id}] Unit={unit} Name={name} Supplier={supplier}")
 
-        # Rename and save file
-        safe_name = (
-            f"{timestamp_safe}_{unit}_{name}_{supplier}_{parcel_type}.jpg"
-        ).replace(" ", "_").replace("/", "-")
-        final_path = os.path.join(UPLOAD_FOLDER, safe_name)
-        os.rename(temp_path, final_path)
+                timestamp_readable = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+                timestamp_safe     = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-        # Step 3: Queue for 1Valet
-        print("\n" + "="*60)
-        print("🔐 STEP 3: QUEUEING FOR 1VALET")
-        print("="*60)
-        
-        valet_status = "skipped"
-        alert_message = None
-        
-        if unit == "UNKNOWN" or not unit or unit == "":
-            # Alert for unknown unit
-            valet_status = "error"
-            alert_message = f"⚠️ UNIT NOT RECOGNIZED\nParcel for: {name}\nPlease add manually to 1Valet"
-            print(f"❌ {alert_message}")
-        else:
-            # Add to queue for 1Valet browser listener
-            pending_units_queue.append({
-                "unit": unit,
-                "name": name,
-                "supplier": supplier,
-                "parcel_type": parcel_type,
-                "timestamp": timestamp_readable
-            })
-            valet_status = "queued"
-            print(f"✓ Unit {unit} queued for 1Valet")
-            print(f"✓ Queue size: {len(pending_units_queue)}")
+                append_row([timestamp_readable, unit, name, supplier, parcel_type, "", ""])
+                print(f"[{job_id}] Sheets written")
 
-        print("\n" + "="*60)
-        print("✅ WORKFLOW COMPLETE")
-        print("="*60)
-        
-        response_data = {
-            "status": "success",
-            "message": "Parcel processed successfully",
-            "image_saved_as": safe_name,
-            "data": {
-                "unit": unit,
-                "name": name,
-                "supplier": supplier,
-                "parcel_type": parcel_type
-            },
-            "sheets_status": "success",
-            "valet_status": valet_status,
-            "alert": alert_message
-        }
-        
-        return jsonify(response_data), 200
+                safe_name  = f"{timestamp_safe}_{unit}_{name}_{supplier}_{parcel_type}.jpg"
+                safe_name  = safe_name.replace(" ", "_").replace("/", "-")
+                final_path = os.path.join(UPLOAD_FOLDER, safe_name)
+                os.rename(temp_path, final_path)
+
+                valet_status  = "skipped"
+                alert_message = None
+
+                if not unit or unit == "UNKNOWN":
+                    valet_status  = "error"
+                    alert_message = f"UNIT NOT RECOGNIZED — parcel for: {name}"
+                    print(f"[{job_id}] {alert_message}")
+                else:
+                    pending_units_queue.append({
+                        "unit": unit, "name": name,
+                        "supplier": supplier, "parcel_type": parcel_type,
+                        "timestamp": timestamp_readable
+                    })
+                    valet_status = "queued"
+                    print(f"[{job_id}] Queued. Queue size: {len(pending_units_queue)}")
+
+                job_results[job_id] = {
+                    "status": "success",
+                    "message": "Parcel processed successfully",
+                    "image_saved_as": safe_name,
+                    "data": {"unit": unit, "name": name,
+                             "supplier": supplier, "parcel_type": parcel_type},
+                    "sheets_status": "success",
+                    "valet_status": valet_status,
+                    "alert": alert_message
+                }
+                print(f"[{job_id}] Done")
+
+            except Exception as e:
+                traceback.print_exc()
+                if os.path.exists(temp_path):
+                    try: os.remove(temp_path)
+                    except: pass
+                job_results[job_id] = {"status": "error", "error": str(e)}
+
+        threading.Thread(target=process, args=(job_id, temp_path), daemon=True).start()
+        return jsonify({"status": "processing", "job_id": job_id}), 202
 
     except Exception as e:
-        print(f"\n❌ ERROR: {e}")
         traceback.print_exc()
-        return jsonify({
-            "error": str(e),
-            "alert": f"⚠️ ERROR PROCESSING PARCEL\n{str(e)}"
-        }), 500
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/result/<job_id>", methods=["GET"])
+def get_job_result(job_id):
+    """Phone polls this after /upload returns a job_id."""
+    result = job_results.get(job_id)
+    if result is None:
+        return jsonify({"status": "not_found"}), 404
+    if result.get("status") in ("success", "error"):
+        job_results.pop(job_id, None)
+    return jsonify(result)
 
 
 @app.route("/valet/pending", methods=["GET"])
 def get_pending_units():
-    """
-    API endpoint for 1Valet browser to poll for pending units.
-    The browser script on Work PC calls this to get units to add.
-    """
     global pending_units_queue
-    
     if not pending_units_queue:
-        return jsonify({
-            "status": "empty",
-            "units": []
-        })
-    
-    # Return all pending units
+        return jsonify({"status": "empty", "units": []})
     units = pending_units_queue.copy()
-    
-    return jsonify({
-        "status": "pending",
-        "count": len(units),
-        "units": units
-    })
+    return jsonify({"status": "pending", "count": len(units), "units": units})
 
 
 @app.route("/valet/complete", methods=["POST"])
 def mark_unit_complete():
-    """
-    Called by browser script after successfully adding unit to 1Valet.
-    """
     global pending_units_queue
-    
-    data = request.get_json()
-    unit = data.get("unit")
+    data    = request.get_json()
+    unit    = data.get("unit")
     success = data.get("success", False)
-    
     if success:
-        # Remove from queue
         pending_units_queue = [u for u in pending_units_queue if u["unit"] != unit]
-        print(f"✅ Unit {unit} marked complete and removed from queue")
-        print(f"   Remaining in queue: {len(pending_units_queue)}")
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Unit {unit} removed from queue",
-            "remaining": len(pending_units_queue)
-        })
+        print(f"Unit {unit} marked complete. Remaining: {len(pending_units_queue)}")
+        return jsonify({"status": "success", "message": f"Unit {unit} removed from queue", "remaining": len(pending_units_queue)})
     else:
-        print(f"⚠️ Unit {unit} failed to add to 1Valet")
-        return jsonify({
-            "status": "error",
-            "message": "Failed to add unit"
-        }), 400
+        print(f"Unit {unit} failed to add to 1Valet")
+        return jsonify({"status": "error", "message": "Failed to add unit"}), 400
 
 
 @app.route("/valet/queue-status", methods=["GET"])
 def queue_status():
-    """Check status of pending units queue."""
-    return jsonify({
-        "queue_size": len(pending_units_queue),
-        "pending_units": [u["unit"] for u in pending_units_queue]
-    })
+    return jsonify({"queue_size": len(pending_units_queue), "pending_units": [u["unit"] for u in pending_units_queue]})
 
 
 @app.route("/valet/clear-queue", methods=["POST"])
 def clear_queue():
-    """Clear all pending units (emergency reset)."""
     global pending_units_queue
     count = len(pending_units_queue)
     pending_units_queue = []
-    
-    return jsonify({
-        "status": "success",
-        "message": f"Cleared {count} units from queue"
-    })
+    return jsonify({"status": "success", "message": f"Cleared {count} units from queue"})
 
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("🚀 ParcelVision Enhanced - Remote 1Valet Control (NGROK MODE)")
+    print("ParcelVision - Remote 1Valet Control")
     print("="*60)
-    
-    print("\n" + "="*60)
-    print("🌐 Server starting on http://0.0.0.0:5002")
-    print("="*60 + "\n")
-    
-    # Get MacBook IP for easy reference
+    print("\nServer starting on http://0.0.0.0:5002\n")
     try:
         import socket
-        hostname = socket.gethostname()
-        local_ip = socket.gethostbyname(hostname)
-        print(f"💡 Your MacBook IP: {local_ip}")
-        print(f"   Access from phone: http://{local_ip}:5002\n") # <-- HTTP
-    except Exception as e:
-        print("Could not determine local IP. Please find it in System Settings > Network.")
-        print(f"   Access from phone: http://YOUR_MAC_IP:5002\n")
-    
-    # Run the app with HTTP
+        local_ip = socket.gethostbyname(socket.gethostname())
+        print(f"Local IP: {local_ip}")
+        print(f"Phone access: http://{local_ip}:5002\n")
+    except Exception:
+        pass
     app.run(host="0.0.0.0", port=5002, debug=True)
