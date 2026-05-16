@@ -1,4 +1,7 @@
-"""\napp2.py - ParcelVision with Remote 1Valet Control\n(HTTP Version for NGROK)\n"""
+"""
+app2.py - ParcelVision with Remote 1Valet Control
+(HTTP Version for NGROK)
+"""
 
 from flask import Flask, request, jsonify, render_template
 
@@ -21,7 +24,7 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
 from vision_utils import analyze_parcel
-from sheet_utils import append_row
+from sheet_utils import append_row, connect_to_sheet
 
 print("Loaded modules:")
 print(f"  - vision_utils from: {inspect.getfile(analyze_parcel)}")
@@ -67,6 +70,41 @@ release_queue = []
 
 # Job results store for async upload processing
 job_results = {}
+
+
+def _poll_sheet_releases():
+    """
+    Background thread: every 30s scan the Google Sheet for rows where
+    column F (RELEASED checkbox) is TRUE and column G (released_time) is
+    still empty. Adds matching units to release_queue and writes the
+    notification timestamp to column G so they're not re-triggered.
+    """
+    import time
+    print("[ReleasePoller] Started — checking sheet every 30s for RELEASED rows")
+    while True:
+        try:
+            ws = connect_to_sheet()
+            all_rows = ws.get_all_values()
+            for i, row in enumerate(all_rows):
+                if i == 0:
+                    continue  # skip header
+                if len(row) < 6:
+                    continue
+                released = str(row[5]).strip().upper()
+                notified = str(row[6]).strip() if len(row) > 6 else ""
+                if released in ("TRUE", "1", "YES") and not notified:
+                    unit = str(row[1]).strip().upper()
+                    if unit and unit not in ("", "UNKNOWN"):
+                        ts = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+                        release_queue.append({"unit": unit, "timestamp": ts})
+                        ws.update_cell(i + 1, 7, ts)
+                        print(f"[ReleasePoller] Queued release for unit {unit}")
+        except Exception as e:
+            print(f"[ReleasePoller] Error: {e}")
+        time.sleep(30)
+
+
+threading.Thread(target=_poll_sheet_releases, daemon=True).start()
 
 
 # ============================================================
@@ -218,19 +256,6 @@ def clear_queue():
     count = len(pending_units_queue)
     pending_units_queue = []
     return jsonify({"status": "success", "message": f"Cleared {count} units from queue"})
-
-
-@app.route("/valet/release", methods=["POST"])
-def queue_release():
-    """Google Apps Script calls this when RELEASED checkbox is ticked in Sheets."""
-    global release_queue
-    data = request.get_json(silent=True) or {}
-    unit = str(data.get("unit", "")).strip().upper()
-    if not unit:
-        return jsonify({"error": "unit required"}), 400
-    release_queue.append({"unit": unit, "timestamp": datetime.now().strftime("%m/%d/%Y %H:%M:%S")})
-    print(f"Release queued for unit {unit}. Queue size: {len(release_queue)}")
-    return jsonify({"status": "queued", "unit": unit})
 
 
 @app.route("/valet/release-pending", methods=["GET"])
