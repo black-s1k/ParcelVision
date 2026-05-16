@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
 # ParcelVision — one-command startup
-#   • Resolves a public SERVER_URL (Tailscale → cloudflared → localhost.run → local IP)
+#   • Resolves a public SERVER_URL (Tailscale → cloudflared → serveo.net → localhost.run → local IP)
 #   • Starts Flask (app2.py)
 #   • Injects the 1Valet listener script into Chrome automatically
 #
@@ -141,37 +141,63 @@ elif command -v cloudflared &>/dev/null; then
     fi
 fi
 
-# Priority 3: localhost.run SSH tunnel — no install, no admin needed
-# Works with Windows built-in SSH or Git Bash SSH
+# Priority 3: SSH tunnels (try serveo.net first, fall back to localhost.run)
+# Both need no install — serveo.net uses a different domain in case lhr.life is blocked
 if [ -z "$SERVER_URL" ] && command -v ssh &>/dev/null; then
-    info "Starting SSH tunnel via localhost.run (no admin required)..."
+    info "Starting SSH tunnel via serveo.net..."
     TUNNEL_LOG="$(mktemp)"
     ssh -o StrictHostKeyChecking=no \
         -o ServerAliveInterval=30 \
         -o ConnectTimeout=15 \
         -R "80:localhost:5002" \
-        nokey@localhost.run \
+        serveo.net \
         >"$TUNNEL_LOG" 2>&1 &
     TUNNEL_PID=$!
 
-    for i in $(seq 1 25); do
-        SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.lhr\.life' \
+    for i in $(seq 1 20); do
+        SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.serveo\.net' \
             "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
         [ -n "$SERVER_URL" ] && break
-        printf "  waiting for tunnel... %ds\r" "$i"
+        printf "  waiting for serveo tunnel... %ds\r" "$i"
         sleep 1
     done
     echo ""
 
     if [ -n "$SERVER_URL" ]; then
-        ok "SSH tunnel (localhost.run): $SERVER_URL"
+        ok "SSH tunnel (serveo.net): $SERVER_URL"
     else
-        warn "SSH tunnel failed — falling back to local IP."
+        warn "serveo.net failed — trying localhost.run..."
         kill "$TUNNEL_PID" 2>/dev/null || true
         TUNNEL_PID=""
-        SERVER_URL="http://$(local_ip):5002"
-        warn "Phone must be on the same Wi-Fi as this machine."
-        info "Local IP: $SERVER_URL"
+
+        TUNNEL_LOG="$(mktemp)"
+        ssh -o StrictHostKeyChecking=no \
+            -o ServerAliveInterval=30 \
+            -o ConnectTimeout=15 \
+            -R "80:localhost:5002" \
+            nokey@localhost.run \
+            >"$TUNNEL_LOG" 2>&1 &
+        TUNNEL_PID=$!
+
+        for i in $(seq 1 20); do
+            SERVER_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.lhr\.life' \
+                "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
+            [ -n "$SERVER_URL" ] && break
+            printf "  waiting for localhost.run tunnel... %ds\r" "$i"
+            sleep 1
+        done
+        echo ""
+
+        if [ -n "$SERVER_URL" ]; then
+            ok "SSH tunnel (localhost.run): $SERVER_URL"
+        else
+            warn "Both SSH tunnels failed — falling back to local IP."
+            kill "$TUNNEL_PID" 2>/dev/null || true
+            TUNNEL_PID=""
+            SERVER_URL="http://$(local_ip):5002"
+            warn "Phone must be on the same Wi-Fi as this machine."
+            info "Local IP: $SERVER_URL"
+        fi
     fi
 fi
 
@@ -185,7 +211,15 @@ fi
 save_server_url "$SERVER_URL"
 export SERVER_URL
 
-# ── 2. Start Flask ────────────────────────────────────────────────────
+# ── 2. Open Windows Firewall for port 5002 (silent, no-op if already open) ──
+if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+    netsh advfirewall firewall add rule \
+        name="ParcelVision Flask 5002" dir=in action=allow \
+        protocol=TCP localport=5002 \
+        >/dev/null 2>&1 || true
+fi
+
+# ── 3. Start Flask ────────────────────────────────────────────────────
 echo ""
 info "Starting Flask server (app2.py)..."
 cd "$BACKEND"
@@ -199,7 +233,7 @@ for i in $(seq 1 20); do
 done
 ok "Flask is ready on port 5002."
 
-# ── 3. Inject into Chrome ─────────────────────────────────────────────
+# ── 4. Inject into Chrome ─────────────────────────────────────────────
 echo ""
 info "Injecting 1Valet script into Chrome..."
 "$PY" "$BACKEND/inject_tab.py" "$SERVER_URL" \
