@@ -266,6 +266,42 @@
       letter-spacing: 0.04em;
     }
 
+    /* ── Building tabs ── */
+    .building-tabs {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.25rem 0 0.125rem;
+    }
+    .btab {
+      flex: 1;
+      padding: 0.625rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-2);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      text-align: center;
+      line-height: 1.3;
+    }
+    .btab .btab-addr {
+      display: block;
+      font-size: 0.65rem;
+      font-weight: 400;
+      color: var(--text-3);
+      margin-top: 0.15rem;
+      transition: color 0.15s;
+    }
+    .btab:hover { border-color: #444; color: var(--text); }
+    .btab.active {
+      background: rgba(255,255,255,0.07);
+      border-color: #555;
+      color: var(--text);
+    }
+    .btab.active .btab-addr { color: var(--text-2); }
+
     /* ── Footer ── */
     .footer {
       text-align: center;
@@ -290,6 +326,18 @@
     <div class="header">
       <h1>ParcelVision</h1>
       <p>Parcel logging for concierge &amp; front desk</p>
+    </div>
+
+    <!-- Building selector -->
+    <div class="building-tabs" id="buildingTabs">
+      <button class="btab" data-b="g2" id="tabG2">
+        Galleria 2
+        <span class="btab-addr">19 Graphophone Grove</span>
+      </button>
+      <button class="btab" data-b="g1" id="tabG1">
+        Galleria 1
+        <span class="btab-addr">1285 Dupont St</span>
+      </button>
     </div>
 
     <!-- Upload card -->
@@ -361,6 +409,27 @@
     const metaGrid        = document.getElementById("metaGrid");
     const savedName       = document.getElementById("savedName");
     const uploadMoreBtn   = document.getElementById("uploadMoreBtn");
+    const headerSub       = document.querySelector(".header p");
+
+    /* ── Building selector ── */
+    let selectedBuilding = "g2";
+    const BUILDING_LABELS = {
+      g2: "Galleria 2 — parcel logging",
+      g1: "Galleria 1 — parcel logging",
+    };
+
+    function selectBuilding(b) {
+      selectedBuilding = b;
+      document.querySelectorAll(".btab").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.b === b);
+      });
+      if (headerSub) headerSub.textContent = BUILDING_LABELS[b];
+    }
+
+    document.querySelectorAll(".btab").forEach(btn => {
+      btn.addEventListener("click", () => selectBuilding(btn.dataset.b));
+    });
+    selectBuilding("g2");
 
     const UPLOAD_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
         fill="none" stroke="currentColor" stroke-width="1.5"
@@ -488,35 +557,68 @@
       `).join("");
     }
 
+    /* ── Poll /result/<job_id> every 2s until done (max 60s) ── */
+    async function pollResult(jobId) {
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const res = await fetch("/result/" + jobId);
+          let data;
+          try { data = await res.json(); } catch (e) { continue; }
+          if (data.status === "success") {
+            setStatus("success", "✅", data.message || "Parcel logged successfully.");
+            savedName.textContent = data.image_saved_as || "";
+            buildMeta(data.data || {});
+            resultCard.classList.add("show", "slide-up");
+            submitBtn.disabled = false;
+            return;
+          }
+          if (data.status === "error") {
+            setStatus("error", "!", data.error || "Processing failed.");
+            submitBtn.disabled = false;
+            return;
+          }
+        } catch (e) { /* network blip — keep polling */ }
+        setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label...");
+      }
+      setStatus("error", "!", "Timed out — parcel may still have been logged. Check Google Sheets.");
+      submitBtn.disabled = false;
+    }
+
     /* ── Submit ── */
     submitBtn.addEventListener("click", async () => {
       const file = fileInput.files[0];
       if (!file) return;
       submitBtn.disabled = true;
       resultCard.classList.remove("show");
-      setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label...");
+      setStatus("info", `<div class="spinner"></div>`, "Uploading image...");
 
       try {
         const blob = await compressImage(file);
         const formData = new FormData();
         formData.append("file", blob, "image.jpg");
+        formData.append("building", selectedBuilding);
 
         const res = await fetch("/upload", { method: "POST", body: formData });
         let body;
         try { body = await res.json(); }
         catch (e) { throw new Error("Server returned an unexpected response — check tunnel or server logs."); }
 
-        if (body.status === "success") {
+        if (body.job_id) {
+          setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label...");
+          pollResult(body.job_id);
+        } else if (body.status === "success") {
           setStatus("success", "✅", body.message || "Parcel logged successfully.");
           savedName.textContent = body.image_saved_as || "";
           buildMeta(body.data || {});
           resultCard.classList.add("show", "slide-up");
+          submitBtn.disabled = false;
         } else {
           setStatus("error", "!", body.error || "Upload failed.");
+          submitBtn.disabled = false;
         }
       } catch (err) {
         setStatus("error", "!", "Network error: " + err.message);
-      } finally {
         submitBtn.disabled = false;
       }
     });

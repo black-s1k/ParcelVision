@@ -1,0 +1,315 @@
+/**
+ * 1VALET AUTO-LISTENER - Work PC Browser Script (NGROK Version)
+ * GALLERIA 1 — 1285 Dupont St
+ *
+ * Polls /valet/pending?building=g1 and listens for WebSocket release_unit events
+ * scoped to the g1 room.
+ */
+(function() {
+    'use strict';
+
+    // ============================================================
+    // NGROK URL
+    // ============================================================
+
+    const SERVER_URL = "https://72bf0081d337.ngrok-free.app";
+
+    // ============================================================
+
+    const BUILDING = "g1";
+
+    const CONFIG = { pollInterval: 5000, autoStart: true };
+    const state = {
+        isRunning: false,
+        pollTimer: null,
+        releasePollTimer: null,
+        socket: null,
+        processedUnits: new Set(),
+        isProcessing: false,
+        isProcessingRelease: false
+    };
+
+    async function addUnit(unitNumber) {
+        console.log(`\n📦 Adding unit: ${unitNumber}...`);
+        try {
+            const input = [...document.querySelectorAll('input')].find(inp =>
+                inp.placeholder && inp.placeholder.toLowerCase().includes('suite') && inp.offsetParent !== null
+            );
+            if (!input) { console.error('❌ Input field not found - is popup still open?'); return false; }
+            input.value = ''; input.focus();
+            for (const char of unitNumber) {
+                input.value += char;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                await sleep(50);
+            }
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            console.log(`  ✓ Typed: ${unitNumber}`);
+            await sleep(800);
+            const allOptions = [...document.querySelectorAll('div, li, span')];
+            const matchingOption = allOptions.find(el => {
+                const text = el.textContent.trim();
+                return text === unitNumber && el.offsetParent !== null && el.getBoundingClientRect().height > 10;
+            });
+            if (matchingOption) {
+                matchingOption.click();
+                console.log(`  ✓ Selected: ${unitNumber}`);
+                console.log('✅ Unit added!\n');
+            } else {
+                console.log('  ⚠️ Trying Enter key...');
+                input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+                await sleep(300);
+                console.log('✅ Enter pressed\n');
+            }
+
+            await sleep(1000);
+            const inputAfterAdd = [...document.querySelectorAll('input')].find(inp =>
+                inp.placeholder && inp.placeholder.toLowerCase().includes('suite') && inp.offsetParent !== null
+            );
+            if (inputAfterAdd) {
+                inputAfterAdd.focus();
+                console.log('↪️ Re-focused input for next entry.');
+            }
+            return true;
+        } catch (error) {
+            console.error('❌ Error:', error.message);
+            return false;
+        }
+    }
+
+    async function checkForPendingUnits() {
+        if (state.isProcessing) return;
+        try {
+            const response = await fetch(`${SERVER_URL}/valet/pending?building=${BUILDING}`, {
+                headers: { 'ngrok-skip-browser-warning': 'true' }
+            });
+            if (!response.ok) { return; }
+            const data = await response.json();
+            if (data.status === 'empty' || data.units.length === 0) return;
+            console.log(`\n📋 Found ${data.count} pending unit(s)`);
+            const unitData = data.units[0];
+            const unit = unitData.unit;
+            if (state.processedUnits.has(unit)) {
+                console.log(`⏭️  Skipping ${unit} (already processed)`);
+                await fetch(`${SERVER_URL}/valet/complete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+                    body: JSON.stringify({ unit, success: true, building: BUILDING })
+                });
+                return;
+            }
+            console.log(`🔄 Processing: ${unit} (${unitData.name})`);
+            state.isProcessing = true;
+            const success = await addUnit(unit);
+            if (success) {
+                state.processedUnits.add(unit);
+                await fetch(`${SERVER_URL}/valet/complete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+                    body: JSON.stringify({ unit, success: true, building: BUILDING })
+                });
+                console.log(`✅ Notified server: ${unit} complete`);
+            }
+            state.isProcessing = false;
+        } catch (error) {
+            console.error('❌ Polling error:', error.message);
+            state.isProcessing = false;
+        }
+    }
+
+    function startListener() {
+        if (state.isRunning) { console.log('⚠️ Listener already running'); return; }
+        const input = [...document.querySelectorAll('input')].find(inp =>
+            inp.placeholder && inp.placeholder.toLowerCase().includes('suite')
+        );
+        if (!input) {
+            console.error('❌ "ADD DELIVERY" popup not open!');
+            console.log('💡 Click "ADD DELIVERY" button first, then run: startValetListener()');
+            return;
+        }
+        state.isRunning = true;
+        console.log('\n' + '='.repeat(60));
+        console.log('🚀 1VALET AUTO-LISTENER STARTED — GALLERIA 1');
+        console.log('='.repeat(60));
+        console.log(`📡 Polling: ${SERVER_URL} (building=${BUILDING})`);
+        console.log(`⏱️  Interval: ${CONFIG.pollInterval / 1000}s`);
+        console.log(`⚠️  Keep popup open!`);
+        console.log('✋ Stop with: stopValetListener()');
+        console.log('='.repeat(60) + '\n');
+        state.pollTimer = setInterval(checkForPendingUnits, CONFIG.pollInterval);
+        checkForPendingUnits();
+    }
+
+    function startReleaseListener() {
+        if (state.socket) return;
+        const s = document.createElement('script');
+        s.src = SERVER_URL + '/socket.io/socket.io.js';
+        s.onload = function() {
+            const socket = io(SERVER_URL, {
+                extraHeaders: { 'ngrok-skip-browser-warning': 'true' },
+                transports: ['websocket', 'polling']
+            });
+            socket.on('connect', () => {
+                socket.emit('join_building', { building: BUILDING });
+                console.log('🔌 WebSocket connected — joined room: ' + BUILDING);
+            });
+            socket.on('disconnect', () => {
+                console.log('⚠️ WebSocket disconnected — will reconnect automatically');
+            });
+            socket.on('release_unit', async (data) => {
+                const unit = data.unit;
+                console.log(`\n🔔 INSTANT release notification for unit: ${unit}`);
+                if (state.isProcessingRelease) return;
+                state.isProcessingRelease = true;
+                const confirmed = window.confirm(
+                    `📦 Unit ${unit} has been marked as PICKED UP in Google Sheets.\n\nMark this unit as RETRIEVED in the 1Valet smart locker? (Galleria 1)`
+                );
+                if (confirmed) {
+                    const ok = await markAsRetrieved(unit);
+                    if (ok) console.log(`✅ Unit ${unit} retrieve complete.`);
+                    else console.warn(`⚠️ Could not auto-retrieve ${unit} — please do it manually.`);
+                } else {
+                    console.log(`⏭️ Skipped retrieve for unit ${unit} (user cancelled).`);
+                }
+                state.isProcessingRelease = false;
+            });
+            state.socket = socket;
+        };
+        s.onerror = function() {
+            console.warn('⚠️ WebSocket unavailable — falling back to HTTP polling every 10s');
+            state.releasePollTimer = setInterval(checkForReleases, 10000);
+            checkForReleases();
+        };
+        document.head.appendChild(s);
+        console.log('🔔 Release listener connecting via WebSocket...');
+    }
+
+    function stopListener() {
+        if (!state.isRunning) { console.log('⚠️ Listener not running'); return; }
+        clearInterval(state.pollTimer);
+        if (state.socket) { state.socket.disconnect(); state.socket = null; }
+        if (state.releasePollTimer) { clearInterval(state.releasePollTimer); state.releasePollTimer = null; }
+        state.isRunning = false;
+        console.log('\n🛑 Listener stopped');
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function markAsRetrieved(unitNumber) {
+        console.log(`\n📤 Marking unit ${unitNumber} as retrieved...`);
+        try {
+            const allElements = [...document.querySelectorAll('td, div, span, p')];
+            const unitEl = allElements.find(el =>
+                el.textContent.trim() === unitNumber && el.offsetParent !== null
+            );
+            if (!unitEl) {
+                console.warn(`⚠️ Unit ${unitNumber} not found in page — is the correct locker view open?`);
+                return false;
+            }
+            let row = unitEl;
+            for (let i = 0; i < 5; i++) {
+                if (!row.parentElement) break;
+                row = row.parentElement;
+            }
+            const actionBtn = row.querySelector('button, [role="button"], [aria-haspopup]') ||
+                [...row.querySelectorAll('button, [role="button"]')].find(b =>
+                    /action|more|menu|\.\.\.|⋮/i.test(b.textContent + b.getAttribute('aria-label'))
+                );
+            if (actionBtn) {
+                actionBtn.click();
+                console.log(`  ✓ Clicked action button for ${unitNumber}`);
+                await sleep(500);
+            }
+            const retrieved = [...document.querySelectorAll('button, li, [role="menuitem"], a, div, span')]
+                .find(el => /mark as retrieved/i.test(el.textContent) && el.offsetParent !== null);
+            if (!retrieved) {
+                console.error(`❌ "Mark as retrieved" option not found — check popup is open.`);
+                return false;
+            }
+            retrieved.click();
+            console.log(`  ✓ Clicked "Mark as retrieved" for unit ${unitNumber}`);
+            console.log(`✅ Unit ${unitNumber} marked as retrieved!\n`);
+            return true;
+        } catch (error) {
+            console.error('❌ Error during retrieve:', error.message);
+            return false;
+        }
+    }
+
+    async function checkForReleases() {
+        if (state.isProcessingRelease) return;
+        try {
+            const response = await fetch(`${SERVER_URL}/valet/release-pending?building=${BUILDING}`, {
+                headers: { 'ngrok-skip-browser-warning': 'true' }
+            });
+            if (!response.ok) return;
+            const data = await response.json();
+            if (data.status === 'empty' || data.units.length === 0) return;
+            for (const item of data.units) {
+                const unit = item.unit;
+                console.log(`\n🔔 Release request for unit: ${unit}`);
+                state.isProcessingRelease = true;
+                const confirmed = window.confirm(
+                    `📦 Unit ${unit} has been marked as PICKED UP in Google Sheets.\n\nMark this unit as RETRIEVED in the 1Valet smart locker? (Galleria 1)`
+                );
+                if (confirmed) {
+                    const ok = await markAsRetrieved(unit);
+                    if (ok) console.log(`✅ Unit ${unit} retrieve complete.`);
+                    else console.warn(`⚠️ Could not auto-retrieve ${unit} — please do it manually.`);
+                } else {
+                    console.log(`⏭️ Skipped retrieve for unit ${unit} (user cancelled).`);
+                }
+                state.isProcessingRelease = false;
+            }
+        } catch (error) {
+            console.error('❌ Release poll error:', error.message);
+            state.isProcessingRelease = false;
+        }
+    }
+
+    function checkStatus() {
+        console.log('\n📊 STATUS — GALLERIA 1');
+        console.log('='.repeat(60));
+        console.log(`Running: ${state.isRunning ? '✅ Yes' : '❌ No'}`);
+        console.log(`Processing: ${state.isProcessing ? '✅ Yes' : '❌ No'}`);
+        console.log(`Processed units: ${state.processedUnits.size}`);
+        console.log(`Units: ${[...state.processedUnits].join(', ') || 'None'}`);
+        console.log('='.repeat(60) + '\n');
+    }
+
+    function clearCache() { state.processedUnits.clear(); console.log('✅ Cleared processed units cache'); }
+
+    window.startValetListener = startListener;
+    window.stopValetListener  = stopListener;
+    window.startReleaseListener = startReleaseListener;
+    window.valetStatus        = checkStatus;
+    window.valetClearCache    = clearCache;
+    window.addUnit            = addUnit;
+
+    console.log(`
+╔════════════════════════════════════════════════════════════╗
+║   1VALET AUTO-LISTENER — GALLERIA 1 (1285 Dupont St)       ║
+╚════════════════════════════════════════════════════════════╝
+🎛️  CONTROLS:
+  startValetListener()  - Start delivery polling (needs ADD DELIVERY popup)
+  stopValetListener()   - Stop
+  valetStatus()         - Show status
+
+📝 SETUP CHECKLIST:
+  ✅ Server URL set to: ${SERVER_URL}
+  ✅ Building: GALLERIA 1
+  ✅ Release listener started automatically
+  ✅ Click "ADD DELIVERY" button then startValetListener() for deliveries
+⚠️  Update SERVER_URL every time you restart the ngrok server.
+╔════════════════════════════════════════════════════════════╝
+    `);
+
+    // Release listener starts immediately — no ADD DELIVERY popup needed
+    startReleaseListener();
+
+    if (CONFIG.autoStart) {
+        console.log('🔄 Auto-starting delivery listener in 3s (open ADD DELIVERY popup first)...\n');
+        setTimeout(startListener, 3000);
+    } else {
+        console.log('💡 Run startValetListener() to begin delivery polling\n');
+    }
+})();
