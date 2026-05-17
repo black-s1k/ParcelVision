@@ -94,6 +94,8 @@ def _extract_unit_from_text(text: str) -> str:
     patterns = [
         # Explicit keyword + optional separator + unit (with optional letter suffix)
         r"(?:UNIT|APT|SUITE|APARTMENT|ROOM|RM|#)\s*[:#\-]?\s*(\d{1,5}[A-Z]?)\b",
+        # Canadian condo format: UNIT# - STREET# Street Name (unit is before the dash)
+        r"^(\d{3,5}[A-Z]?)\s*-\s*\d{1,3}\s+[A-Z]",
         # Unit embedded at the start of an address line: "1911B - 123 Main St"
         r"^(\d{2,5}[A-Z]?)\s*[-,]",
         # Unit after a dash in address: "123 Main St - 204A"
@@ -193,18 +195,19 @@ _GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Your job is
 Extract and return ONLY a JSON object with exactly these fields:
 
 {
-  "unit": "<apartment, suite, or unit number — 2-4 digits with optional letter, e.g. 204, 1911, 204A, 1911B>",
+  "unit": "<apartment, suite, or unit number — typically 3-4 digits, e.g. 204, 1011, 2401>",
   "name": "<recipient's full personal name, e.g. John Smith — NOT a company name>",
   "supplier": "<one of: AMAZON, UPS, FEDEX, UNI, DRAGONFLY, EMILE, FLEETOPTICS, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER>",
-  "parcel_type": "<color + type, e.g. BROWN BOX, WHITE PACKAGE, GREY PACKAGE>"
+  "parcel_type": "<see rules below>"
 }
 
 Rules for \"unit\":
-- The unit/suite number is a SHORT number (typically 2-4 digits, e.g. 204, 1011, 1911).
-- The civic/street number (e.g. the \"19\" in \"19 Graphophone Grove\" or \"1285\" in \"1285 Dupont St\") is NOT the unit. Do NOT return the street number as the unit.
-- If the address line contains both a street number and a unit (e.g. \"1285 Dupont St, Suite 204\"), return only the suite/unit portion (204).
-- Look for keywords: APT, UNIT, SUITE, #, or a number appearing AFTER the street name (not before it).
-- Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
+- The unit/suite number is typically 3-4 digits (e.g. 204, 1011, 2401, 1911).
+- Canadian condo addresses often use the format \"UNIT# - STREET# Street Name\". Example: \"2401 - 10 Graphophone Grove\" → unit is 2401, street number is 10. The unit is the LARGER number BEFORE the dash; the street number is the smaller number AFTER the dash.
+- The civic/street numbers for these buildings are \"10\" (10 Graphophone Grove) and \"1285\" (1285 Dupont St). Do NOT return these as the unit.
+- If the address contains both a street number and a unit (e.g. \"1285 Dupont St, Suite 204\"), return only the suite/unit portion (204).
+- Look for keywords: APT, UNIT, SUITE, #, or a number appearing BEFORE a dash and before the street name.
+- Canadian postal codes (e.g. M5V 3A8, M6H 0E5) are NOT unit numbers.
 - Include any trailing letter suffix (204A stays 204A).
 - If no unit found, use \"UNKNOWN\".
 
@@ -221,8 +224,10 @@ Rules for \"parcel_type\":
 - Any other brown cardboard box → \"BROWN BOX\"
 - Any other brown soft parcel/mailer → \"BROWN PACKAGE\"
 - NEVER use \"bag\" or \"paper bag\" — use PACKAGE or BOX instead.
-- White/grey polybag or padded mailer → \"WHITE PACKAGE\" or \"GREY PACKAGE\"
-- Only use \"WHITE PACKAGE\" if no brand colour or brown is visible.
+- Clear/transparent plastic poly bag or pouch → \"CLEAR PACKAGE\"
+- White opaque polybag or padded mailer → \"WHITE PACKAGE\"
+- Grey polybag or padded mailer → \"GREY PACKAGE\"
+- Only use \"WHITE PACKAGE\" if the bag is visibly opaque white (not see-through).
 - Return ONLY the JSON object. No markdown, no explanation."""
 
 
@@ -315,8 +320,8 @@ def _normalize(data: Dict, image_path: str) -> Dict:
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
     unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
 
-    # Known building street numbers — reject if Gemini returned one of these
-    _STREET_NUMBERS = {"19", "1285"}
+    # Known building street numbers — reject if Gemini returned one of these (exact match only)
+    _STREET_NUMBERS = {"10", "1285"}
     if unit_candidate in _STREET_NUMBERS:
         unit_candidate = "UNKNOWN"
 
@@ -353,10 +358,10 @@ _FOCUSED_PROMPT = """Look very carefully at this shipping label image.
 I need ONLY these two fields from the DELIVERY/RECIPIENT address block (ignore the return/sender address):
 
 1. The apartment/suite/unit number:
-   - It is a SHORT number, typically 2-4 digits (e.g. 204, 1011, 1911, 204A).
-   - The street/civic number at the START of an address line (e.g. \"19\" in \"19 Graphophone Grove\") is NOT the unit.
-   - Look for it AFTER keywords APT, UNIT, SUITE, # — or as a number appearing after the street name.
-   - Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
+   - Typically 3-4 digits (e.g. 204, 1011, 2401).
+   - Canadian condo format: \"UNIT# - STREET# Street Name\" — e.g. \"2401 - 10 Graphophone Grove\" → unit is 2401 (before the dash), NOT 10 (the street number after the dash).
+   - Building street numbers to reject: \"10\" (10 Graphophone Grove) and \"1285\" (1285 Dupont St).
+   - Canadian postal codes (e.g. M5V 3A8, M6H 0E5) are NOT unit numbers.
    - If genuinely not found, return \"UNKNOWN\".
 
 2. The recipient's full personal name (First Last) — NOT a company name.
