@@ -146,18 +146,29 @@ def _extract_name_from_text(text: str) -> str:
 def fallback_regex_ocr(image_path: str) -> Dict:
     """
     Backup OCR extraction using pytesseract + regex if Gemini fails.
+    Gracefully handles missing tesseract (returns UNKNOWN for text fields).
     """
     preprocessed = preprocess_image(image_path)
+    text = ""
     try:
-        # Use page segmentation mode 6 (single uniform block of text)
         config = r"--oem 3 --psm 6"
         text = pytesseract.image_to_string(preprocessed, config=config).upper()
+    except (FileNotFoundError, Exception) as e:
+        print(f"⚠️ pytesseract unavailable: {e}")
     finally:
         if preprocessed != image_path:
             try:
                 os.unlink(preprocessed)
             except OSError:
                 pass
+
+    if not text:
+        return {
+            "unit": "UNKNOWN",
+            "name": "UNKNOWN",
+            "supplier": "OTHER",
+            "parcel_type": guess_parcel_type(image_path),
+        }
 
     suppliers_priority = [
         "AMAZON", "UPS", "FEDEX", "UNI", "DRAGONFLY", "EMILE", "FLEETOPTICS",
@@ -248,7 +259,7 @@ def extract_with_gemini(image_path: str) -> Dict:
             "temperature": 0,
             "topP": 1,
             "topK": 1,
-            "maxOutputTokens": 512,
+            "maxOutputTokens": 1024,
         },
     }
 
@@ -267,12 +278,24 @@ def extract_with_gemini(image_path: str) -> Dict:
     # Strip markdown code fences if present
     raw = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
 
-    # Extract JSON object
-    json_match = re.search(r"\{.*?\}", raw, re.DOTALL)
-    if not json_match:
-        raise Exception(f"No valid JSON in Gemini output:\n{raw}")
+    # Try standard JSON parse first (greedy match to handle multi-line)
+    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(0))
+            return _normalize(data, image_path)
+        except json.JSONDecodeError:
+            pass
 
-    data = json.loads(json_match.group(0))
+    # Gemini output was truncated — salvage field values with targeted regex
+    print(f"⚠️ JSON parse failed — salvaging fields from partial output:\n{raw}")
+    data = {}
+    for field in ("unit", "name", "supplier", "parcel_type"):
+        m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
+        if m:
+            data[field] = m.group(1)
+    if not data:
+        raise Exception(f"No valid JSON in Gemini output:\n{raw}")
     return _normalize(data, image_path)
 
 
@@ -375,7 +398,7 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
                 {"inline_data": {"mime_type": mime, "data": image_data}},
             ]
         }],
-        "generationConfig": {"temperature": 0, "topP": 1, "topK": 1, "maxOutputTokens": 256},
+        "generationConfig": {"temperature": 0, "topP": 1, "topK": 1, "maxOutputTokens": 512},
     }
 
     try:
