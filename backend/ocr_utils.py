@@ -58,9 +58,6 @@ def preprocess_image(image_path: str) -> str:
 # ----------------------------------------------------------------------
 
 def guess_parcel_type(image_path: str) -> str:
-    """
-    Simple color + texture classifier for parcel type.
-    """
     img = cv2.imread(image_path)
     if img is None:
         return "BROWN BOX"
@@ -87,20 +84,11 @@ def guess_parcel_type(image_path: str) -> str:
 
 
 def _extract_unit_from_text(text: str) -> str:
-    """
-    Try multiple patterns to extract a unit number from OCR text.
-    Preserves alphanumeric suffixes (e.g., 204A, 1911B).
-    """
     patterns = [
-        # Explicit keyword + optional separator + unit (with optional letter suffix)
         r"(?:UNIT|APT|SUITE|APARTMENT|ROOM|RM|#)\s*[:#\-]?\s*(\d{1,5}[A-Z]?)\b",
-        # Unit embedded at the start of an address line: "1911B - 123 Main St"
         r"^(\d{2,5}[A-Z]?)\s*[-,]",
-        # Unit after a dash in address: "123 Main St - 204A"
         r"-\s*(\d{2,5}[A-Z]?)\s*$",
-        # Bare unit on its own line (2-4 digits optionally followed by a letter)
         r"^\s*(\d{2,4}[A-Z]?)\s*$",
-        # Fallback: first 2-5 digit sequence (with optional letter) that looks like a unit
         r"\b(\d{2,5}[A-Z]?)\b",
     ]
     for pat in patterns:
@@ -112,11 +100,6 @@ def _extract_unit_from_text(text: str) -> str:
 
 
 def _extract_name_from_text(text: str) -> str:
-    """
-    Extract recipient name from OCR text.
-    Looks for 'TO:' blocks first, then falls back to capitalized word pairs.
-    """
-    # Look for "TO:" label followed by a name on the same or next line
     to_block = re.search(
         r"(?:^|\n)\s*TO\s*:?\s*([A-Z][A-Za-z'\-]{1,}(?:\s+[A-Z][A-Za-z'\-]{1,})+)",
         text, re.MULTILINE
@@ -124,13 +107,11 @@ def _extract_name_from_text(text: str) -> str:
     if to_block:
         return to_block.group(1).strip().title()
 
-    # Capitalized full name (2+ words, allows short names like "Li Wang")
     name_match = re.search(
         r"\b([A-Z][A-Z'\-]{0,}(?:\s+[A-Z][A-Z'\-]{0,})+)\b", text
     )
     if name_match:
         candidate = name_match.group(1).strip()
-        # Avoid matching supplier names / common label keywords
         skip_words = {
             "AMAZON", "FEDEX", "UPS", "DHL", "PUROLATOR", "CANADA POST",
             "CANPAR", "INTELCOM", "UNIT", "SUITE", "APT", "STREET", "AVENUE",
@@ -146,18 +127,29 @@ def _extract_name_from_text(text: str) -> str:
 def fallback_regex_ocr(image_path: str) -> Dict:
     """
     Backup OCR extraction using pytesseract + regex if Gemini fails.
+    Gracefully handles missing tesseract (returns UNKNOWN for text fields).
     """
     preprocessed = preprocess_image(image_path)
+    text = ""
     try:
-        # Use page segmentation mode 6 (single uniform block of text)
         config = r"--oem 3 --psm 6"
         text = pytesseract.image_to_string(preprocessed, config=config).upper()
+    except (FileNotFoundError, Exception) as e:
+        print(f"⚠️ pytesseract unavailable: {e}")
     finally:
         if preprocessed != image_path:
             try:
                 os.unlink(preprocessed)
             except OSError:
                 pass
+
+    if not text:
+        return {
+            "unit": "UNKNOWN",
+            "name": "UNKNOWN",
+            "supplier": "OTHER",
+            "parcel_type": guess_parcel_type(image_path),
+        }
 
     suppliers_priority = [
         "AMAZON", "UPS", "FEDEX", "UNI", "DRAGONFLY", "EMILE", "FLEETOPTICS",
@@ -182,24 +174,34 @@ _GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Your job is
 Extract and return ONLY a JSON object with exactly these fields:
 
 {
-  "unit": "<apartment, suite, or unit number — keep alphanumeric suffix if present, e.g. 204A, 1911B, 310>",
+  "unit": "<apartment, suite, or unit number — 2-4 digits with optional letter, e.g. 204, 1911, 204A, 1911B>",
   "name": "<recipient's full personal name, e.g. John Smith — NOT a company name>",
   "supplier": "<one of: AMAZON, UPS, FEDEX, UNI, DRAGONFLY, EMILE, FLEETOPTICS, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER>",
   "parcel_type": "<color + type, e.g. BROWN BOX, WHITE PACKAGE, GREY PACKAGE>"
 }
 
-Rules:
-- "unit": Look for keywords APT, UNIT, SUITE, # or a short alphanumeric token at the start of the delivery address line. Include any trailing letter (e.g. 204A stays 204A). If not found, use "UNKNOWN".
-- "name": Must be a person's name (First Last). Ignore company names, building names, and courier names. If the label shows both a company and a person, return the person's name. If not found, use "UNKNOWN".
-- "supplier": Match the courier branding/logo visible on the label to the list above.
-- "parcel_type": Describe the physical package colour and form.
+Rules for \"unit\":
+- The unit/suite number is a SHORT number (typically 2-4 digits, e.g. 204, 1011, 1911).
+- The civic/street number (e.g. the \"19\" in \"19 Graphophone Grove\" or \"1285\" in \"1285 Dupont St\") is NOT the unit. Do NOT return the street number as the unit.
+- If the address line contains both a street number and a unit (e.g. \"1285 Dupont St, Suite 204\"), return only the suite/unit portion (204).
+- Look for keywords: APT, UNIT, SUITE, #, or a number appearing AFTER the street name (not before it).
+- Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
+- Include any trailing letter suffix (204A stays 204A).
+- If no unit found, use \"UNKNOWN\".
+
+Rules for \"name\":
+- Must be a personal name (First Last). NOT a company, building, or courier name.
+- Look for prefixes like \"ATTN:\", \"C/O:\", \"Attention:\", or \"Care of:\" — the name immediately follows.
+- If the label shows both a company and a person's name, return the person's name.
+- If only a company name is present (no individual), use \"UNKNOWN\".
+
+Other rules:
+- \"supplier\": Match courier branding/logo to the list above.
+- \"parcel_type\": Describe physical package colour and form.
 - Return ONLY the JSON object. No markdown, no explanation."""
 
 
 def extract_with_gemini(image_path: str) -> Dict:
-    """
-    Primary extraction via Gemini Vision API with image preprocessing.
-    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set")
@@ -215,7 +217,6 @@ def extract_with_gemini(image_path: str) -> Dict:
             except OSError:
                 pass
 
-    # Detect mime type from extension
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/png" if ext == ".png" else "image/jpeg"
 
@@ -235,7 +236,7 @@ def extract_with_gemini(image_path: str) -> Dict:
             "temperature": 0,
             "topP": 1,
             "topK": 1,
-            "maxOutputTokens": 512,
+            "maxOutputTokens": 1024,
         },
     }
 
@@ -250,29 +251,45 @@ def extract_with_gemini(image_path: str) -> Dict:
         raise Exception("No candidates in Gemini response")
 
     raw = result["candidates"][0]["content"]["parts"][0].get("text", "").strip()
-
-    # Strip markdown code fences if present
     raw = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
 
-    # Extract JSON object
-    json_match = re.search(r"\{.*?\}", raw, re.DOTALL)
-    if not json_match:
-        raise Exception(f"No valid JSON in Gemini output:\n{raw}")
+    # Try greedy JSON match (handles multi-line output)
+    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if json_match:
+        try:
+            data = json.loads(json_match.group(0))
+            return _normalize(data, image_path)
+        except json.JSONDecodeError:
+            pass
 
-    data = json.loads(json_match.group(0))
+    # Salvage field values from truncated output
+    print(f"⚠️ JSON parse failed — salvaging fields from partial output:\n{raw}")
+    data = {}
+    for field in ("unit", "name", "supplier", "parcel_type"):
+        m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
+        if m:
+            data[field] = m.group(1)
+    if not data:
+        raise Exception(f"No valid JSON in Gemini output:\n{raw}")
     return _normalize(data, image_path)
 
 
 def _normalize(data: Dict, image_path: str) -> Dict:
-    """
-    Normalize and validate extracted fields.
-    Preserves alphanumeric unit suffixes (e.g., 204A).
-    """
     # --- Unit ---
     unit_raw = str(data.get("unit", "")).strip().upper()
-    # Accept digits with optional trailing letter: 204, 204A, 1911B
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
-    data["unit"] = unit_match.group(1) if unit_match else "UNKNOWN"
+    unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
+
+    # Reject known building street numbers
+    _STREET_NUMBERS = {"19", "1285"}
+    if unit_candidate in _STREET_NUMBERS:
+        unit_candidate = "UNKNOWN"
+
+    # Reject 5-digit postal/zip codes
+    if re.fullmatch(r"\d{5}", unit_candidate):
+        unit_candidate = "UNKNOWN"
+
+    data["unit"] = unit_candidate
 
     # --- Name ---
     name = str(data.get("name", "")).strip()
@@ -300,21 +317,22 @@ _FOCUSED_PROMPT = """Look very carefully at this shipping label image.
 
 I need ONLY these two fields from the DELIVERY/RECIPIENT address block (ignore the return/sender address):
 
-1. The apartment, unit, or suite number — it may appear as:
-   - After words like: APT, UNIT, SUITE, #
-   - As the first token on the address line before a dash or comma
-   - As a short number like 204, 1911, or with a letter like 204A, 1911B
+1. The apartment/suite/unit number:
+   - It is a SHORT number, typically 2-4 digits (e.g. 204, 1011, 1911, 204A).
+   - The street/civic number at the START of an address line (e.g. \"19\" in \"19 Graphophone Grove\") is NOT the unit.
+   - Look for it AFTER keywords APT, UNIT, SUITE, # — or as a number appearing after the street name.
+   - Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
+   - If genuinely not found, return \"UNKNOWN\".
 
 2. The recipient's full personal name (First Last) — NOT a company name.
+   - Check for \"ATTN:\", \"C/O:\", or \"Attention:\" prefixes — the name follows immediately.
+   - If only a company name exists (no individual), return \"UNKNOWN\".
 
 Return ONLY JSON:
-{"unit": "<unit number or UNKNOWN>", "name": "<full name or UNKNOWN>"}"""
+{\"unit\": \"<unit number or UNKNOWN>\", \"name\": \"<full name or UNKNOWN>\"}"""
 
 
 def _retry_focused(image_path: str, current: Dict) -> Dict:
-    """
-    If unit or name is still UNKNOWN after first pass, do a second focused call.
-    """
     if current.get("unit") != "UNKNOWN" and current.get("name") != "UNKNOWN":
         return current
 
@@ -348,7 +366,7 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
                 {"inline_data": {"mime_type": mime, "data": image_data}},
             ]
         }],
-        "generationConfig": {"temperature": 0, "topP": 1, "topK": 1, "maxOutputTokens": 256},
+        "generationConfig": {"temperature": 0, "topP": 1, "topK": 1, "maxOutputTokens": 512},
     }
 
     try:
@@ -401,10 +419,8 @@ def extract_data(image_path: str) -> Dict:
         print(f"⚠️ Gemini failed: {e}\nUsing fallback OCR...")
         result = fallback_regex_ocr(image_path)
 
-    # Second pass: focused retry for any remaining UNKNOWN fields
     result = _retry_focused(image_path, result)
 
-    # Final fallback fill for any still-missing fields
     for key in ["unit", "name", "supplier", "parcel_type"]:
         if not result.get(key) or result[key] == "UNKNOWN":
             print(f"⚠️ {key} still unknown — filling via OCR fallback...")
@@ -424,21 +440,15 @@ def extract_data(image_path: str) -> Dict:
     return result
 
 
-# ----------------------------------------------------------------------
-# --- CLI ENTRY --------------------------------------------------------
-# ----------------------------------------------------------------------
-
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
         print("Usage: python ocr_utils.py <image_path>")
         sys.exit(1)
-
     path = sys.argv[1]
     if not os.path.exists(path):
         print(f"❌ File not found: {path}")
         sys.exit(1)
-
     result = extract_data(path)
     print("\n📋 JSON OUTPUT:")
     print(json.dumps(result, indent=2))
