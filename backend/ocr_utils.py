@@ -182,17 +182,30 @@ _GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Your job is
 Extract and return ONLY a JSON object with exactly these fields:
 
 {
-  "unit": "<apartment, suite, or unit number — keep alphanumeric suffix if present, e.g. 204A, 1911B, 310>",
+  "unit": "<apartment, suite, or unit number — 2-4 digits with optional letter, e.g. 204, 1911, 204A, 1911B>",
   "name": "<recipient's full personal name, e.g. John Smith — NOT a company name>",
   "supplier": "<one of: AMAZON, UPS, FEDEX, UNI, DRAGONFLY, EMILE, FLEETOPTICS, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER>",
   "parcel_type": "<color + type, e.g. BROWN BOX, WHITE PACKAGE, GREY PACKAGE>"
 }
 
-Rules:
-- "unit": Look for keywords APT, UNIT, SUITE, # or a short alphanumeric token at the start of the delivery address line. Include any trailing letter (e.g. 204A stays 204A). If not found, use "UNKNOWN".
-- "name": Must be a person's name (First Last). Ignore company names, building names, and courier names. If the label shows both a company and a person, return the person's name. If not found, use "UNKNOWN".
-- "supplier": Match the courier branding/logo visible on the label to the list above.
-- "parcel_type": Describe the physical package colour and form.
+Rules for "unit":
+- The unit/suite number is a SHORT number (typically 2-4 digits, e.g. 204, 1011, 1911).
+- The civic/street number (e.g. the "19" in "19 Graphophone Grove" or "1285" in "1285 Dupont St") is NOT the unit. Do NOT return the street number as the unit.
+- If the address line contains both a street number and a unit (e.g. "1285 Dupont St, Suite 204"), return only the suite/unit portion (204).
+- Look for keywords: APT, UNIT, SUITE, #, or a number appearing AFTER the street name (not before it).
+- Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
+- Include any trailing letter suffix (204A stays 204A).
+- If no unit found, use "UNKNOWN".
+
+Rules for "name":
+- Must be a personal name (First Last). NOT a company, building, or courier name.
+- Look for prefixes like "ATTN:", "C/O:", "Attention:", or "Care of:" — the name immediately follows.
+- If the label shows both a company and a person's name, return the person's name.
+- If only a company name is present (no individual), use "UNKNOWN".
+
+Other rules:
+- "supplier": Match courier branding/logo to the list above.
+- "parcel_type": Describe physical package colour and form.
 - Return ONLY the JSON object. No markdown, no explanation."""
 
 
@@ -270,9 +283,19 @@ def _normalize(data: Dict, image_path: str) -> Dict:
     """
     # --- Unit ---
     unit_raw = str(data.get("unit", "")).strip().upper()
-    # Accept digits with optional trailing letter: 204, 204A, 1911B
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
-    data["unit"] = unit_match.group(1) if unit_match else "UNKNOWN"
+    unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
+
+    # Known building street numbers — reject if Gemini returned one of these
+    _STREET_NUMBERS = {"19", "1285"}
+    if unit_candidate in _STREET_NUMBERS:
+        unit_candidate = "UNKNOWN"
+
+    # Reject pure 5-digit numbers (postal codes / zip codes, not suite numbers)
+    if re.fullmatch(r"\d{5}", unit_candidate):
+        unit_candidate = "UNKNOWN"
+
+    data["unit"] = unit_candidate
 
     # --- Name ---
     name = str(data.get("name", "")).strip()
@@ -300,12 +323,16 @@ _FOCUSED_PROMPT = """Look very carefully at this shipping label image.
 
 I need ONLY these two fields from the DELIVERY/RECIPIENT address block (ignore the return/sender address):
 
-1. The apartment, unit, or suite number — it may appear as:
-   - After words like: APT, UNIT, SUITE, #
-   - As the first token on the address line before a dash or comma
-   - As a short number like 204, 1911, or with a letter like 204A, 1911B
+1. The apartment/suite/unit number:
+   - It is a SHORT number, typically 2-4 digits (e.g. 204, 1011, 1911, 204A).
+   - The street/civic number at the START of an address line (e.g. "19" in "19 Graphophone Grove") is NOT the unit.
+   - Look for it AFTER keywords APT, UNIT, SUITE, # — or as a number appearing after the street name.
+   - Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
+   - If genuinely not found, return "UNKNOWN".
 
 2. The recipient's full personal name (First Last) — NOT a company name.
+   - Check for "ATTN:", "C/O:", or "Attention:" prefixes — the name follows immediately.
+   - If only a company name exists (no individual), return "UNKNOWN".
 
 Return ONLY JSON:
 {"unit": "<unit number or UNKNOWN>", "name": "<full name or UNKNOWN>"}"""

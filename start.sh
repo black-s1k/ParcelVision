@@ -146,6 +146,14 @@ else
     warn "smartlockerscript.txt not found — skipping."
 fi
 
+SCRIPT_G1="$BACKEND/smartlockerscript_g1.txt"
+if [ -f "$SCRIPT_G1" ]; then
+    sed -i "$URL_PATTERN" "$SCRIPT_G1"
+    ok "smartlockerscript_g1.txt updated with: $SERVER_URL"
+else
+    warn "smartlockerscript_g1.txt not found — skipping."
+fi
+
 RELEASE_GS="$BACKEND/sheets_release_script.gs"
 if [ -f "$RELEASE_GS" ]; then
     sed -i "$URL_PATTERN" "$RELEASE_GS"
