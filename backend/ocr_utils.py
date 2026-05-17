@@ -58,6 +58,9 @@ def preprocess_image(image_path: str) -> str:
 # ----------------------------------------------------------------------
 
 def guess_parcel_type(image_path: str) -> str:
+    """
+    Simple color + texture classifier for parcel type.
+    """
     img = cv2.imread(image_path)
     if img is None:
         return "BROWN BOX"
@@ -84,11 +87,20 @@ def guess_parcel_type(image_path: str) -> str:
 
 
 def _extract_unit_from_text(text: str) -> str:
+    """
+    Try multiple patterns to extract a unit number from OCR text.
+    Preserves alphanumeric suffixes (e.g., 204A, 1911B).
+    """
     patterns = [
+        # Explicit keyword + optional separator + unit (with optional letter suffix)
         r"(?:UNIT|APT|SUITE|APARTMENT|ROOM|RM|#)\s*[:#\-]?\s*(\d{1,5}[A-Z]?)\b",
+        # Unit embedded at the start of an address line: "1911B - 123 Main St"
         r"^(\d{2,5}[A-Z]?)\s*[-,]",
+        # Unit after a dash in address: "123 Main St - 204A"
         r"-\s*(\d{2,5}[A-Z]?)\s*$",
+        # Bare unit on its own line (2-4 digits optionally followed by a letter)
         r"^\s*(\d{2,4}[A-Z]?)\s*$",
+        # Fallback: first 2-5 digit sequence (with optional letter) that looks like a unit
         r"\b(\d{2,5}[A-Z]?)\b",
     ]
     for pat in patterns:
@@ -100,6 +112,11 @@ def _extract_unit_from_text(text: str) -> str:
 
 
 def _extract_name_from_text(text: str) -> str:
+    """
+    Extract recipient name from OCR text.
+    Looks for 'TO:' blocks first, then falls back to capitalized word pairs.
+    """
+    # Look for "TO:" label followed by a name on the same or next line
     to_block = re.search(
         r"(?:^|\n)\s*TO\s*:?\s*([A-Z][A-Za-z'\-]{1,}(?:\s+[A-Z][A-Za-z'\-]{1,})+)",
         text, re.MULTILINE
@@ -107,11 +124,13 @@ def _extract_name_from_text(text: str) -> str:
     if to_block:
         return to_block.group(1).strip().title()
 
+    # Capitalized full name (2+ words, allows short names like "Li Wang")
     name_match = re.search(
         r"\b([A-Z][A-Z'\-]{0,}(?:\s+[A-Z][A-Z'\-]{0,})+)\b", text
     )
     if name_match:
         candidate = name_match.group(1).strip()
+        # Avoid matching supplier names / common label keywords
         skip_words = {
             "AMAZON", "FEDEX", "UPS", "DHL", "PUROLATOR", "CANADA POST",
             "CANPAR", "INTELCOM", "UNIT", "SUITE", "APT", "STREET", "AVENUE",
@@ -195,13 +214,22 @@ Rules for \"name\":
 - If the label shows both a company and a person's name, return the person's name.
 - If only a company name is present (no individual), use \"UNKNOWN\".
 
-Other rules:
-- \"supplier\": Match courier branding/logo to the list above.
-- \"parcel_type\": Describe physical package colour and form.
+Rules for \"parcel_type\":
+- Amazon shipments in blue poly mailers/bags → \"PRIME BLUE PACKAGE\"
+- Amazon shipments in orange packaging → \"PRIME ORANGE PACKAGE\"
+- Amazon brown cardboard boxes with Prime logo → \"AMAZON BOX\"
+- Any other brown cardboard box → \"BROWN BOX\"
+- Any other brown soft parcel/mailer → \"BROWN PACKAGE\"
+- NEVER use \"bag\" or \"paper bag\" — use PACKAGE or BOX instead.
+- White/grey polybag or padded mailer → \"WHITE PACKAGE\" or \"GREY PACKAGE\"
+- Only use \"WHITE PACKAGE\" if no brand colour or brown is visible.
 - Return ONLY the JSON object. No markdown, no explanation."""
 
 
 def extract_with_gemini(image_path: str) -> Dict:
+    """
+    Primary extraction via Gemini Vision API with image preprocessing.
+    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set")
@@ -217,6 +245,7 @@ def extract_with_gemini(image_path: str) -> Dict:
             except OSError:
                 pass
 
+    # Detect mime type from extension
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/png" if ext == ".png" else "image/jpeg"
 
@@ -251,9 +280,11 @@ def extract_with_gemini(image_path: str) -> Dict:
         raise Exception("No candidates in Gemini response")
 
     raw = result["candidates"][0]["content"]["parts"][0].get("text", "").strip()
+
+    # Strip markdown code fences if present
     raw = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
 
-    # Try greedy JSON match (handles multi-line output)
+    # Try standard JSON parse first (greedy match to handle multi-line)
     json_match = re.search(r"\{.*\}", raw, re.DOTALL)
     if json_match:
         try:
@@ -262,7 +293,7 @@ def extract_with_gemini(image_path: str) -> Dict:
         except json.JSONDecodeError:
             pass
 
-    # Salvage field values from truncated output
+    # Gemini output was truncated — salvage field values with targeted regex
     print(f"⚠️ JSON parse failed — salvaging fields from partial output:\n{raw}")
     data = {}
     for field in ("unit", "name", "supplier", "parcel_type"):
@@ -275,17 +306,21 @@ def extract_with_gemini(image_path: str) -> Dict:
 
 
 def _normalize(data: Dict, image_path: str) -> Dict:
+    """
+    Normalize and validate extracted fields.
+    Preserves alphanumeric unit suffixes (e.g., 204A).
+    """
     # --- Unit ---
     unit_raw = str(data.get("unit", "")).strip().upper()
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
     unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
 
-    # Reject known building street numbers
+    # Known building street numbers — reject if Gemini returned one of these
     _STREET_NUMBERS = {"19", "1285"}
     if unit_candidate in _STREET_NUMBERS:
         unit_candidate = "UNKNOWN"
 
-    # Reject 5-digit postal/zip codes
+    # Reject pure 5-digit numbers (postal codes / zip codes, not suite numbers)
     if re.fullmatch(r"\d{5}", unit_candidate):
         unit_candidate = "UNKNOWN"
 
@@ -333,6 +368,9 @@ Return ONLY JSON:
 
 
 def _retry_focused(image_path: str, current: Dict) -> Dict:
+    """
+    If unit or name is still UNKNOWN after first pass, do a second focused call.
+    """
     if current.get("unit") != "UNKNOWN" and current.get("name") != "UNKNOWN":
         return current
 
@@ -419,8 +457,10 @@ def extract_data(image_path: str) -> Dict:
         print(f"⚠️ Gemini failed: {e}\nUsing fallback OCR...")
         result = fallback_regex_ocr(image_path)
 
+    # Second pass: focused retry for any remaining UNKNOWN fields
     result = _retry_focused(image_path, result)
 
+    # Final fallback fill for any still-missing fields
     for key in ["unit", "name", "supplier", "parcel_type"]:
         if not result.get(key) or result[key] == "UNKNOWN":
             print(f"⚠️ {key} still unknown — filling via OCR fallback...")
@@ -440,15 +480,21 @@ def extract_data(image_path: str) -> Dict:
     return result
 
 
+# ----------------------------------------------------------------------
+# --- CLI ENTRY --------------------------------------------------------
+# ----------------------------------------------------------------------
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
         print("Usage: python ocr_utils.py <image_path>")
         sys.exit(1)
+
     path = sys.argv[1]
     if not os.path.exists(path):
         print(f"❌ File not found: {path}")
         sys.exit(1)
+
     result = extract_data(path)
     print("\n📋 JSON OUTPUT:")
     print(json.dumps(result, indent=2))
