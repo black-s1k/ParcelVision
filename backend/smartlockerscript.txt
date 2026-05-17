@@ -18,9 +18,8 @@
     // --- No need to edit below this line ---
 
     const CONFIG = { pollInterval: 5000, autoStart: true };
-    const state = { isRunning: false, pollTimer: null, releasePollTimer: null, processedUnits: new Set(), isProcessing: false, isProcessingRelease: false };
+    const state = { isRunning: false, pollTimer: null, processedUnits: new Set(), isProcessing: false };
 
-    // ⬇️ UPDATED THIS FUNCTION ⬇️
     async function addUnit(unitNumber) {
         console.log(`\n📦 Adding unit: ${unitNumber}...`);
         try {
@@ -50,12 +49,7 @@
                 await sleep(300);
                 console.log('✅ Enter pressed\n');
             }
-
-            // === NEW CODE TO RE-FOCUS INPUT ===
-            // Wait for 1Valet UI to process the click/Enter
-            await sleep(1000); 
-            
-            // Find the input field again (it might be re-rendered)
+            await sleep(1000);
             const inputAfterAdd = [...document.querySelectorAll('input')].find(inp => inp.placeholder && inp.placeholder.toLowerCase().includes('suite') && inp.offsetParent !== null);
             if (inputAfterAdd) {
                 inputAfterAdd.focus();
@@ -63,10 +57,7 @@
             } else {
                 console.log('↪️ Input field not found for re-focus (popup might be closed).');
             }
-            // === END OF NEW CODE ===
-
             return true;
-
         } catch (error) { 
             console.error('❌ Error:', error.message); 
             return false; 
@@ -77,11 +68,8 @@
         if (state.isProcessing) return;
         try {
             const response = await fetch(`${SERVER_URL}/valet/pending`, {
-                headers: {
-                    'ngrok-skip-browser-warning': 'true'
-                }
+                headers: { 'ngrok-skip-browser-warning': 'true' }
             });
-            
             if (!response.ok) { return; }
             const data = await response.json();
             if (data.status === 'empty' || data.units.length === 0) return;
@@ -92,10 +80,7 @@
                 console.log(`⏭️  Skipping ${unit} (already processed)`);
                 await fetch(`${SERVER_URL}/valet/complete`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'ngrok-skip-browser-warning': 'true'
-                    },
+                    headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
                     body: JSON.stringify({ unit, success: true })
                 });
                 return;
@@ -107,10 +92,7 @@
                 state.processedUnits.add(unit);
                 await fetch(`${SERVER_URL}/valet/complete`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'ngrok-skip-browser-warning': 'true'
-                    },
+                    headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
                     body: JSON.stringify({ unit, success: true })
                 });
                 console.log(`✅ Notified MacBook: ${unit} complete`);
@@ -131,7 +113,6 @@
         const input = [...document.querySelectorAll('input')].find(inp => inp.placeholder && inp.placeholder.toLowerCase().includes('suite'));
         if (!input) { console.error('❌ "ADD DELIVERY" popup not open!'); console.log('💡 Click "ADD DELIVERY" button first, then run: startValetListener()'); return; }
         state.isRunning = true;
-
         console.log('\n' + '='.repeat(60));
         console.log('🚀 1VALET AUTO-LISTENER STARTED');
         console.log('='.repeat(60));
@@ -143,113 +124,14 @@
         state.pollTimer = setInterval(checkForPendingUnits, CONFIG.pollInterval);
         checkForPendingUnits();
     }
-    function startReleaseListener() {
-        if (state.releasePollTimer) return; // already running
-        state.releasePollTimer = setInterval(checkForReleases, CONFIG.pollInterval);
-        checkForReleases();
-        console.log('🔔 Release listener active — watching for RELEASED checkbox events');
-    }
     function stopListener() {
         if (!state.isRunning) { console.log('⚠️ Listener not running'); return; }
         clearInterval(state.pollTimer);
-        clearInterval(state.releasePollTimer);
         state.pollTimer = null;
-        state.releasePollTimer = null;
         state.isRunning = false;
         console.log('\n🛑 Listener stopped');
     }
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-    
-    // ── Release polling (Sheets RELEASED checkbox → Mark as retrieved) ──
-
-    async function markAsRetrieved(unitNumber) {
-        console.log(`\n📤 Marking unit ${unitNumber} as retrieved...`);
-        try {
-            // Find a row/cell in the page that matches the unit number
-            const allElements = [...document.querySelectorAll('td, div, span, p')];
-            const unitEl = allElements.find(el =>
-                el.textContent.trim() === unitNumber && el.offsetParent !== null
-            );
-            if (!unitEl) {
-                console.warn(`⚠️ Unit ${unitNumber} not found in page — is the correct locker view open?`);
-                return false;
-            }
-
-            // Walk up to find the parent row/card, then find an action button (⋮ kebab or similar)
-            let row = unitEl;
-            for (let i = 0; i < 5; i++) {
-                if (!row.parentElement) break;
-                row = row.parentElement;
-            }
-
-            // Look for a button that opens a dropdown (kebab, "...", "Actions", etc.)
-            const actionBtn = row.querySelector('button, [role="button"], [aria-haspopup]') ||
-                [...row.querySelectorAll('button, [role="button"]')].find(b =>
-                    /action|more|menu|\.\.\.|⋮/i.test(b.textContent + b.getAttribute('aria-label'))
-                );
-
-            if (actionBtn) {
-                actionBtn.click();
-                console.log(`  ✓ Clicked action button for ${unitNumber}`);
-                await sleep(500);
-            }
-
-            // Find and click "Mark as retrieved" option (case-insensitive)
-            const retrieved = [...document.querySelectorAll('button, li, [role="menuitem"], a, div, span')]
-                .find(el =>
-                    /mark as retrieved/i.test(el.textContent) && el.offsetParent !== null
-                );
-
-            if (!retrieved) {
-                console.error(`❌ "Mark as retrieved" option not found — check popup is open.`);
-                return false;
-            }
-            retrieved.click();
-            console.log(`  ✓ Clicked "Mark as retrieved" for unit ${unitNumber}`);
-            console.log(`✅ Unit ${unitNumber} marked as retrieved!\n`);
-            return true;
-        } catch (error) {
-            console.error('❌ Error during retrieve:', error.message);
-            return false;
-        }
-    }
-
-    async function checkForReleases() {
-        if (state.isProcessingRelease) return;
-        try {
-            const response = await fetch(`${SERVER_URL}/valet/release-pending`, {
-                headers: { 'ngrok-skip-browser-warning': 'true' }
-            });
-            if (!response.ok) return;
-            const data = await response.json();
-            if (data.status === 'empty' || data.units.length === 0) return;
-
-            for (const item of data.units) {
-                const unit = item.unit;
-                console.log(`\n🔔 Release request received for unit: ${unit}`);
-                state.isProcessingRelease = true;
-
-                const confirmed = window.confirm(
-                    `📦 Unit ${unit} has been marked as PICKED UP in Google Sheets.\n\nMark this unit as RETRIEVED in the 1Valet smart locker?`
-                );
-
-                if (confirmed) {
-                    const ok = await markAsRetrieved(unit);
-                    if (ok) {
-                        console.log(`✅ Unit ${unit} retrieve complete.`);
-                    } else {
-                        console.warn(`⚠️ Could not auto-retrieve ${unit} — please do it manually.`);
-                    }
-                } else {
-                    console.log(`⏭️ Skipped retrieve for unit ${unit} (user cancelled).`);
-                }
-                state.isProcessingRelease = false;
-            }
-        } catch (error) {
-            console.error('❌ Release poll error:', error.message);
-            state.isProcessingRelease = false;
-        }
-    }
 
     function checkStatus() {
         console.log('\n📊 STATUS');
@@ -264,7 +146,6 @@
     function clearCache() { state.processedUnits.clear(); console.log('✅ Cleared processed units cache'); }
     window.startValetListener = startListener;
     window.stopValetListener = stopListener;
-    window.startReleaseListener = startReleaseListener;
     window.valetStatus = checkStatus;
     window.valetClearCache = clearCache;
     window.addUnit = addUnit;
@@ -279,15 +160,11 @@
 
 📝 SETUP CHECKLIST:
   ✅ Server URL set to: ${SERVER_URL}
-  ✅ Release listener started automatically
   ✅ Click "ADD DELIVERY" button then startValetListener() for deliveries
 ⚠️  IMPORTANT: You must update the SERVER_URL in this script
     every time you restart the ngrok server on your Mac.
 ╔════════════════════════════════════════════════════════════╝
     `);
-    // Release listener starts immediately — no ADD DELIVERY popup needed
-    startReleaseListener();
-
     if (CONFIG.autoStart) {
         console.log('🔄 Auto-starting delivery listener in 3s (open ADD DELIVERY popup first)...\n');
         setTimeout(startListener, 3000);
