@@ -2,10 +2,8 @@
 # ─────────────────────────────────────────────────────────────────────
 # ParcelVision — one-command startup
 #   • Creates SSH tunnel (serveo.net → localhost.run → local IP fallback)
-#   • Updates backend/smartlockerscript.txt with the new public URL
+#   • Updates smartlockerscript.txt and smartlockerscript_g1.txt with URL
 #   • Starts Flask on port 5002
-#   • Chrome injection is manual: paste smartlockerscript.txt into DevTools
-#     console on tab 3 (index 2) on the 1Valet SmartLocker page
 #
 # Usage (Git Bash on Windows):  ./start.sh
 # ─────────────────────────────────────────────────────────────────────
@@ -28,7 +26,7 @@ echo "  ParcelVision -- Starting up"
 echo "============================================================"
 echo ""
 
-# ── Load .env (only valid KEY=VALUE lines — skip corrupt/garbage lines) ──
+# ── Load .env ─────────────────────────────────────────────────────────
 if [ -f "$ENV_FILE" ]; then
     while IFS='=' read -r key rest; do
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
@@ -53,7 +51,7 @@ FLASK_PID=""
 TUNNEL_PID=""
 TUNNEL_LOG="$SCRIPT_DIR/.tunnel.log"
 
-# ── Open Windows Firewall for port 5002 (silent no-op if rule exists) ─
+# ── Open Windows Firewall for port 5002 ───────────────────────────────
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     netsh advfirewall firewall add rule \
         name="ParcelVision Flask 5002" dir=in action=allow \
@@ -108,24 +106,21 @@ try_tunnel() {
     return 1
 }
 
-# serveo.net requires no login (uses your SSH key for host identification only)
-# localhost.run: nokey@ for anonymous access
-try_tunnel "serveo.net"    "serveo.net"    "serveo.net" \
+try_tunnel "serveo.net" "serveo.net" "serveo.net" \
     || try_tunnel "localhost.run" "nokey" "localhost.run" \
     || true
 
-# ── Local IP (same-WiFi/Ethernet fallback) ────────────────────────────
-LOCAL_IP=""
-if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
-    LOCAL_IP=$(ipconfig 2>/dev/null \
-        | grep "IPv4" \
-        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
-        | grep -v "^127\." \
-        | head -1 || true)
-fi
-
+# ── Local IP fallback if both tunnels failed ──────────────────────────
 if [ -z "$SERVER_URL" ]; then
-    if [ -n "$LOCAL_IP" ]; then
+    LOCAL_IP=""
+    if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+        LOCAL_IP=$(ipconfig 2>/dev/null \
+            | grep "IPv4" \
+            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+            | grep -v "^127\." \
+            | head -1 || true)
+    fi
+    if [ -n "${LOCAL_IP:-}" ]; then
         SERVER_URL="http://$LOCAL_IP:5002"
         warn "No tunnel — using LAN IP: $SERVER_URL"
         warn "Phone must be on the same network as this machine."
@@ -135,48 +130,26 @@ if [ -z "$SERVER_URL" ]; then
     fi
 fi
 
-# ── Update SERVER_URL in both scripts ────────────────────────────────
+# ── Update SERVER_URL in SmartLocker scripts ──────────────────────────
 URL_PATTERN='s|const SERVER_URL = "[^"]*";|const SERVER_URL = "'"${SERVER_URL}"'";|'
 
-SCRIPT_TXT="$BACKEND/smartlockerscript.txt"
-if [ -f "$SCRIPT_TXT" ]; then
-    sed -i "$URL_PATTERN" "$SCRIPT_TXT"
-    ok "smartlockerscript.txt updated with: $SERVER_URL"
-else
-    warn "smartlockerscript.txt not found — skipping."
-fi
-
-SCRIPT_G1="$BACKEND/smartlockerscript_g1.txt"
-if [ -f "$SCRIPT_G1" ]; then
-    sed -i "$URL_PATTERN" "$SCRIPT_G1"
-    ok "smartlockerscript_g1.txt updated with: $SERVER_URL"
-else
-    warn "smartlockerscript_g1.txt not found — skipping."
-fi
-
-RELEASE_GS="$BACKEND/sheets_release_script.gs"
-if [ -f "$RELEASE_GS" ]; then
-    sed -i "$URL_PATTERN" "$RELEASE_GS"
-    ok "sheets_release_script.gs updated with: $SERVER_URL"
-else
-    warn "sheets_release_script.gs not found — skipping."
-fi
+for SCRIPT in "$BACKEND/smartlockerscript.txt" "$BACKEND/smartlockerscript_g1.txt"; do
+    if [ -f "$SCRIPT" ]; then
+        sed -i "$URL_PATTERN" "$SCRIPT"
+        ok "$(basename "$SCRIPT") updated with: $SERVER_URL"
+    fi
+done
 
 # ── Banner ────────────────────────────────────────────────────────────
 echo ""
 echo "============================================================"
-echo "  Flask         : http://localhost:5002"
-if [ -n "$LOCAL_IP" ]; then
-echo "  Local network : http://$LOCAL_IP:5002"
-fi
+echo "  Flask     : http://localhost:5002"
 echo ""
-echo "  >>> PUBLIC URL (phone + SmartLocker script): <<<"
+echo "  >>> PUBLIC URL (phone + SmartLocker scripts): <<<"
 echo "      $SERVER_URL"
 echo ""
-echo "  smartlockerscript.txt has been updated with the above URL."
-echo "  To inject into Chrome (tab 3, index 2 on 1Valet page):"
-echo "    Option A)  python backend/inject_tab.py $SERVER_URL"
-echo "    Option B)  paste smartlockerscript.txt into Chrome DevTools console"
+echo "  Paste smartlockerscript.txt     → G2 1Valet tab"
+echo "  Paste smartlockerscript_g1.txt  → G1 1Valet tab"
 echo ""
 echo "  Press Ctrl+C to stop"
 echo "============================================================"
