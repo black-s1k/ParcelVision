@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
 # ParcelVision — one-command startup
-#   • Fixed URL via serveo.net subdomain (never changes between restarts)
-#   • Falls back to localhost.run if serveo is unavailable
+#   • Creates SSH tunnel (serveo.net → localhost.run → local IP fallback)
+#   • Updates smartlockerscript.txt and smartlockerscript_g1.txt with URL
 #   • Starts Flask on port 5002
 #
 # Usage (Git Bash on Windows):  ./start.sh
@@ -12,9 +12,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND="$SCRIPT_DIR/backend"
 ENV_FILE="$BACKEND/.env"
-
-# ── Fixed tunnel subdomain — URL will always be https://SUBDOMAIN.serveo.net
-TUNNEL_SUBDOMAIN="parcelvision"
 
 # ── Colours ───────────────────────────────────────────────────────────
 C_CYAN='\033[0;36m'; C_GREEN='\033[0;32m'
@@ -76,49 +73,42 @@ for i in $(seq 1 20); do
 done
 ok "Flask is ready on port 5002."
 
-# ── Fixed serveo.net tunnel ───────────────────────────────────────────
-SERVER_URL="https://${TUNNEL_SUBDOMAIN}.serveo.net"
-info "Starting tunnel → ${SERVER_URL} ..."
-> "$TUNNEL_LOG"
-ssh -o StrictHostKeyChecking=no \
-    -o ConnectTimeout=15 \
-    -o ServerAliveInterval=30 \
-    -o ServerAliveCountMax=3 \
-    -R "${TUNNEL_SUBDOMAIN}:80:localhost:5002" \
-    serveo.net >"$TUNNEL_LOG" 2>&1 &
-TUNNEL_PID=$!
+# ── SSH Tunnel ────────────────────────────────────────────────────────
+SERVER_URL=""
 
-# Give serveo 5s to connect; if the process dies the subdomain is taken
-sleep 5
-if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-    warn "serveo.net failed — subdomain '${TUNNEL_SUBDOMAIN}' may be taken."
-    warn "Change TUNNEL_SUBDOMAIN in start.sh and try again, or falling back to localhost.run..."
-    TUNNEL_PID=""
-    SERVER_URL=""
+try_tunnel() {
+    local host="$1"
+    local user_arg="$2"
+    local label="$3"
+    info "Trying SSH tunnel via $label..."
     > "$TUNNEL_LOG"
     ssh -o StrictHostKeyChecking=no \
         -o ConnectTimeout=10 \
         -o ServerAliveInterval=30 \
         -o ServerAliveCountMax=3 \
         -R 80:localhost:5002 \
-        nokey@localhost.run >"$TUNNEL_LOG" 2>&1 &
+        "$user_arg@$host" \
+        >"$TUNNEL_LOG" 2>&1 &
     TUNNEL_PID=$!
+    local url=""
     for i in $(seq 1 15); do
-        SERVER_URL=$(grep -oE 'https://[^[:space:]]+' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
-        [ -n "$SERVER_URL" ] && break || true
+        url=$(grep -oE 'https://[^[:space:]]+' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
+        if [ -n "$url" ]; then
+            SERVER_URL="$url"
+            ok "Tunnel active: $SERVER_URL"
+            return 0
+        fi
         sleep 1
     done
-    if [ -n "$SERVER_URL" ]; then
-        ok "Fallback tunnel active: $SERVER_URL"
-        warn "URL is random this session — update TUNNEL_SUBDOMAIN to fix it."
-    else
-        kill "$TUNNEL_PID" 2>/dev/null || true
-        TUNNEL_PID=""
-        SERVER_URL=""
-    fi
-else
-    ok "Tunnel active: ${SERVER_URL}"
-fi
+    kill "$TUNNEL_PID" 2>/dev/null || true
+    TUNNEL_PID=""
+    warn "$label failed — no URL received within 15s."
+    return 1
+}
+
+try_tunnel "serveo.net" "serveo.net" "serveo.net" \
+    || try_tunnel "localhost.run" "nokey" "localhost.run" \
+    || true
 
 # ── Local IP fallback if both tunnels failed ──────────────────────────
 if [ -z "$SERVER_URL" ]; then
@@ -132,10 +122,11 @@ if [ -z "$SERVER_URL" ]; then
     fi
     if [ -n "${LOCAL_IP:-}" ]; then
         SERVER_URL="http://$LOCAL_IP:5002"
-        warn "Using LAN IP: $SERVER_URL (phone must be on same network)"
+        warn "No tunnel — using LAN IP: $SERVER_URL"
+        warn "Phone must be on the same network as this machine."
     else
         SERVER_URL="http://localhost:5002"
-        warn "Using localhost only — phone upload won't work."
+        warn "No tunnel — using localhost only (phone upload won't work)."
     fi
 fi
 
@@ -154,7 +145,7 @@ echo ""
 echo "============================================================"
 echo "  Flask     : http://localhost:5002"
 echo ""
-echo "  >>> PUBLIC URL (same every restart): <<<"
+echo "  >>> PUBLIC URL (phone + SmartLocker scripts): <<<"
 echo "      $SERVER_URL"
 echo ""
 echo "  Paste smartlockerscript.txt     → G2 1Valet tab"
