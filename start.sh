@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
 # ParcelVision — one-command startup
-#   • Creates SSH tunnel (serveo.net → localhost.run → local IP fallback)
-#   • Updates backend/smartlockerscript.txt and smartlockerscript_g1.txt
-#     with the new public URL on every start
+#   • Fixed URL via serveo.net subdomain (never changes between restarts)
+#   • Falls back to localhost.run if serveo is unavailable
 #   • Starts Flask on port 5002
 #
 # Usage (Git Bash on Windows):  ./start.sh
@@ -14,7 +13,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND="$SCRIPT_DIR/backend"
 ENV_FILE="$BACKEND/.env"
 
-# ── Colours ──────────────────────────────────────────────────────────────
+# ── Fixed tunnel subdomain — URL will always be https://SUBDOMAIN.serveo.net
+TUNNEL_SUBDOMAIN="parcelvision"
+
+# ── Colours ───────────────────────────────────────────────────────────
 C_CYAN='\033[0;36m'; C_GREEN='\033[0;32m'
 C_YELLOW='\033[1;33m'; C_RESET='\033[0m'
 info()  { echo -e "${C_CYAN}  $*${C_RESET}"; }
@@ -27,7 +29,7 @@ echo "  ParcelVision -- Starting up"
 echo "============================================================"
 echo ""
 
-# ── Load .env (only valid KEY=VALUE lines — skip corrupt/garbage lines) ──
+# ── Load .env ─────────────────────────────────────────────────────────
 if [ -f "$ENV_FILE" ]; then
     while IFS='=' read -r key rest; do
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
@@ -52,7 +54,7 @@ FLASK_PID=""
 TUNNEL_PID=""
 TUNNEL_LOG="$SCRIPT_DIR/.tunnel.log"
 
-# ── Open Windows Firewall for port 5002 (silent no-op if rule exists) ─
+# ── Open Windows Firewall for port 5002 ───────────────────────────────
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     netsh advfirewall firewall add rule \
         name="ParcelVision Flask 5002" dir=in action=allow \
@@ -60,7 +62,7 @@ if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
         >/dev/null 2>&1 || true
 fi
 
-# ── Start Flask ─────────────────────────────────────────────────────
+# ── Start Flask ───────────────────────────────────────────────────────
 echo ""
 info "Starting Flask server (app2.py) on port 5002..."
 cd "$BACKEND"
@@ -74,104 +76,89 @@ for i in $(seq 1 20); do
 done
 ok "Flask is ready on port 5002."
 
-# ── SSH Tunnel ────────────────────────────────────────────────────────────
-SERVER_URL=""
+# ── Fixed serveo.net tunnel ───────────────────────────────────────────
+SERVER_URL="https://${TUNNEL_SUBDOMAIN}.serveo.net"
+info "Starting tunnel → ${SERVER_URL} ..."
+> "$TUNNEL_LOG"
+ssh -o StrictHostKeyChecking=no \
+    -o ConnectTimeout=15 \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -R "${TUNNEL_SUBDOMAIN}:80:localhost:5002" \
+    serveo.net >"$TUNNEL_LOG" 2>&1 &
+TUNNEL_PID=$!
 
-try_tunnel() {
-    local host="$1"
-    local user_arg="$2"
-    local label="$3"
-    info "Trying SSH tunnel via $label..."
+# Give serveo 5s to connect; if the process dies the subdomain is taken
+sleep 5
+if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+    warn "serveo.net failed — subdomain '${TUNNEL_SUBDOMAIN}' may be taken."
+    warn "Change TUNNEL_SUBDOMAIN in start.sh and try again, or falling back to localhost.run..."
+    TUNNEL_PID=""
+    SERVER_URL=""
     > "$TUNNEL_LOG"
     ssh -o StrictHostKeyChecking=no \
         -o ConnectTimeout=10 \
         -o ServerAliveInterval=30 \
         -o ServerAliveCountMax=3 \
         -R 80:localhost:5002 \
-        "$user_arg@$host" \
-        >"$TUNNEL_LOG" 2>&1 &
+        nokey@localhost.run >"$TUNNEL_LOG" 2>&1 &
     TUNNEL_PID=$!
-    local url=""
     for i in $(seq 1 15); do
-        url=$(grep -oE 'https://[^[:space:]]+' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
-        if [ -n "$url" ]; then
-            SERVER_URL="$url"
-            ok "Tunnel active: $SERVER_URL"
-            return 0
-        fi
+        SERVER_URL=$(grep -oE 'https://[^[:space:]]+' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
+        [ -n "$SERVER_URL" ] && break || true
         sleep 1
     done
-    kill "$TUNNEL_PID" 2>/dev/null || true
-    TUNNEL_PID=""
-    warn "$label failed — no URL received within 15s."
-    return 1
-}
-
-try_tunnel "serveo.net"    "serveo.net"    "serveo.net" \
-    || try_tunnel "localhost.run" "nokey" "localhost.run" \
-    || true
-
-# ── Local IP (same-WiFi/Ethernet fallback) ─────────────────────────────
-LOCAL_IP=""
-if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
-    LOCAL_IP=$(ipconfig 2>/dev/null \
-        | grep "IPv4" \
-        | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
-        | grep -v "^127\." \
-        | head -1 || true)
+    if [ -n "$SERVER_URL" ]; then
+        ok "Fallback tunnel active: $SERVER_URL"
+        warn "URL is random this session — update TUNNEL_SUBDOMAIN to fix it."
+    else
+        kill "$TUNNEL_PID" 2>/dev/null || true
+        TUNNEL_PID=""
+        SERVER_URL=""
+    fi
+else
+    ok "Tunnel active: ${SERVER_URL}"
 fi
 
+# ── Local IP fallback if both tunnels failed ──────────────────────────
 if [ -z "$SERVER_URL" ]; then
-    if [ -n "$LOCAL_IP" ]; then
+    LOCAL_IP=""
+    if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+        LOCAL_IP=$(ipconfig 2>/dev/null \
+            | grep "IPv4" \
+            | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+            | grep -v "^127\." \
+            | head -1 || true)
+    fi
+    if [ -n "${LOCAL_IP:-}" ]; then
         SERVER_URL="http://$LOCAL_IP:5002"
-        warn "No tunnel — using LAN IP: $SERVER_URL"
-        warn "Phone must be on the same network as this machine."
+        warn "Using LAN IP: $SERVER_URL (phone must be on same network)"
     else
         SERVER_URL="http://localhost:5002"
-        warn "No tunnel — using localhost only (phone upload won't work)."
+        warn "Using localhost only — phone upload won't work."
     fi
 fi
 
-# ── Update SERVER_URL in both SmartLocker scripts ────────────────────────
+# ── Update SERVER_URL in SmartLocker scripts ──────────────────────────
 URL_PATTERN='s|const SERVER_URL = "[^"]*";|const SERVER_URL = "'"${SERVER_URL}"'";|'
 
-SCRIPT_TXT="$BACKEND/smartlockerscript.txt"
-if [ -f "$SCRIPT_TXT" ]; then
-    sed -i "$URL_PATTERN" "$SCRIPT_TXT"
-    ok "smartlockerscript.txt updated with: $SERVER_URL"
-else
-    warn "smartlockerscript.txt not found — skipping."
-fi
+for SCRIPT in "$BACKEND/smartlockerscript.txt" "$BACKEND/smartlockerscript_g1.txt"; do
+    if [ -f "$SCRIPT" ]; then
+        sed -i "$URL_PATTERN" "$SCRIPT"
+        ok "$(basename "$SCRIPT") updated with: $SERVER_URL"
+    fi
+done
 
-SCRIPT_G1="$BACKEND/smartlockerscript_g1.txt"
-if [ -f "$SCRIPT_G1" ]; then
-    sed -i "$URL_PATTERN" "$SCRIPT_G1"
-    ok "smartlockerscript_g1.txt updated with: $SERVER_URL"
-else
-    warn "smartlockerscript_g1.txt not found — skipping."
-fi
-
-RELEASE_GS="$BACKEND/sheets_release_script.gs"
-if [ -f "$RELEASE_GS" ]; then
-    sed -i "$URL_PATTERN" "$RELEASE_GS"
-    ok "sheets_release_script.gs updated with: $SERVER_URL"
-else
-    warn "sheets_release_script.gs not found — skipping."
-fi
-
-# ── Banner ────────────────────────────────────────────────────────────────
+# ── Banner ────────────────────────────────────────────────────────────
 echo ""
 echo "============================================================"
-echo "  Flask         : http://localhost:5002"
-if [ -n "$LOCAL_IP" ]; then
-echo "  Local network : http://$LOCAL_IP:5002"
-fi
+echo "  Flask     : http://localhost:5002"
 echo ""
-echo "  >>> PUBLIC URL (phone + SmartLocker scripts): <<<"
+echo "  >>> PUBLIC URL (same every restart): <<<"
 echo "      $SERVER_URL"
 echo ""
-echo "  Both smartlockerscript.txt and smartlockerscript_g1.txt"
-echo "  have been updated with the above URL."
+echo "  Paste smartlockerscript.txt     → G2 1Valet tab"
+echo "  Paste smartlockerscript_g1.txt  → G1 1Valet tab"
 echo ""
 echo "  Press Ctrl+C to stop"
 echo "============================================================"
