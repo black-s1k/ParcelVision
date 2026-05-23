@@ -1,33 +1,22 @@
 /**
- * 1VALET AUTO-LISTENER - Work PC Browser Script (NGROK Version)
+ * 1VALET AUTO-LISTENER - Work PC Browser Script
  * GALLERIA 1 — 1285 Dupont St
- *
- * Polls /valet/pending?building=g1 and listens for WebSocket release_unit events
- * scoped to the g1 room.
  */
 (function() {
     'use strict';
 
     // ============================================================
-    // NGROK URL
+    // SERVER URL
     // ============================================================
 
-    const SERVER_URL = "https://72bf0081d337.ngrok-free.app";
+    const SERVER_URL = "https://parcelvision.serveo.net";
 
     // ============================================================
 
     const BUILDING = "g1";
 
     const CONFIG = { pollInterval: 5000, autoStart: true };
-    const state = {
-        isRunning: false,
-        pollTimer: null,
-        releasePollTimer: null,
-        socket: null,
-        processedUnits: new Set(),
-        isProcessing: false,
-        isProcessingRelease: false
-    };
+    const state = { isRunning: false, pollTimer: null, processedUnits: new Set(), isProcessing: false };
 
     async function addUnit(unitNumber) {
         console.log(`\n📦 Adding unit: ${unitNumber}...`);
@@ -138,132 +127,15 @@
         checkForPendingUnits();
     }
 
-    function startReleaseListener() {
-        if (state.socket) return;
-        const s = document.createElement('script');
-        s.src = SERVER_URL + '/socket.io/socket.io.js';
-        s.onload = function() {
-            const socket = io(SERVER_URL, {
-                extraHeaders: { 'ngrok-skip-browser-warning': 'true' },
-                transports: ['websocket', 'polling']
-            });
-            socket.on('connect', () => {
-                socket.emit('join_building', { building: BUILDING });
-                console.log('🔌 WebSocket connected — joined room: ' + BUILDING);
-            });
-            socket.on('disconnect', () => {
-                console.log('⚠️ WebSocket disconnected — will reconnect automatically');
-            });
-            socket.on('release_unit', async (data) => {
-                const unit = data.unit;
-                console.log(`\n🔔 INSTANT release notification for unit: ${unit}`);
-                if (state.isProcessingRelease) return;
-                state.isProcessingRelease = true;
-                const confirmed = window.confirm(
-                    `📦 Unit ${unit} has been marked as PICKED UP in Google Sheets.\n\nMark this unit as RETRIEVED in the 1Valet smart locker? (Galleria 1)`
-                );
-                if (confirmed) {
-                    const ok = await markAsRetrieved(unit);
-                    if (ok) console.log(`✅ Unit ${unit} retrieve complete.`);
-                    else console.warn(`⚠️ Could not auto-retrieve ${unit} — please do it manually.`);
-                } else {
-                    console.log(`⏭️ Skipped retrieve for unit ${unit} (user cancelled).`);
-                }
-                state.isProcessingRelease = false;
-            });
-            state.socket = socket;
-        };
-        s.onerror = function() {
-            console.warn('⚠️ WebSocket unavailable — falling back to HTTP polling every 10s');
-            state.releasePollTimer = setInterval(checkForReleases, 10000);
-            checkForReleases();
-        };
-        document.head.appendChild(s);
-        console.log('🔔 Release listener connecting via WebSocket...');
-    }
-
     function stopListener() {
         if (!state.isRunning) { console.log('⚠️ Listener not running'); return; }
         clearInterval(state.pollTimer);
-        if (state.socket) { state.socket.disconnect(); state.socket = null; }
-        if (state.releasePollTimer) { clearInterval(state.releasePollTimer); state.releasePollTimer = null; }
+        state.pollTimer = null;
         state.isRunning = false;
         console.log('\n🛑 Listener stopped');
     }
 
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-    async function markAsRetrieved(unitNumber) {
-        console.log(`\n📤 Marking unit ${unitNumber} as retrieved...`);
-        try {
-            const allElements = [...document.querySelectorAll('td, div, span, p')];
-            const unitEl = allElements.find(el =>
-                el.textContent.trim() === unitNumber && el.offsetParent !== null
-            );
-            if (!unitEl) {
-                console.warn(`⚠️ Unit ${unitNumber} not found in page — is the correct locker view open?`);
-                return false;
-            }
-            let row = unitEl;
-            for (let i = 0; i < 5; i++) {
-                if (!row.parentElement) break;
-                row = row.parentElement;
-            }
-            const actionBtn = row.querySelector('button, [role="button"], [aria-haspopup]') ||
-                [...row.querySelectorAll('button, [role="button"]')].find(b =>
-                    /action|more|menu|\.\.\.|⋮/i.test(b.textContent + b.getAttribute('aria-label'))
-                );
-            if (actionBtn) {
-                actionBtn.click();
-                console.log(`  ✓ Clicked action button for ${unitNumber}`);
-                await sleep(500);
-            }
-            const retrieved = [...document.querySelectorAll('button, li, [role="menuitem"], a, div, span')]
-                .find(el => /mark as retrieved/i.test(el.textContent) && el.offsetParent !== null);
-            if (!retrieved) {
-                console.error(`❌ "Mark as retrieved" option not found — check popup is open.`);
-                return false;
-            }
-            retrieved.click();
-            console.log(`  ✓ Clicked "Mark as retrieved" for unit ${unitNumber}`);
-            console.log(`✅ Unit ${unitNumber} marked as retrieved!\n`);
-            return true;
-        } catch (error) {
-            console.error('❌ Error during retrieve:', error.message);
-            return false;
-        }
-    }
-
-    async function checkForReleases() {
-        if (state.isProcessingRelease) return;
-        try {
-            const response = await fetch(`${SERVER_URL}/valet/release-pending?building=${BUILDING}`, {
-                headers: { 'ngrok-skip-browser-warning': 'true' }
-            });
-            if (!response.ok) return;
-            const data = await response.json();
-            if (data.status === 'empty' || data.units.length === 0) return;
-            for (const item of data.units) {
-                const unit = item.unit;
-                console.log(`\n🔔 Release request for unit: ${unit}`);
-                state.isProcessingRelease = true;
-                const confirmed = window.confirm(
-                    `📦 Unit ${unit} has been marked as PICKED UP in Google Sheets.\n\nMark this unit as RETRIEVED in the 1Valet smart locker? (Galleria 1)`
-                );
-                if (confirmed) {
-                    const ok = await markAsRetrieved(unit);
-                    if (ok) console.log(`✅ Unit ${unit} retrieve complete.`);
-                    else console.warn(`⚠️ Could not auto-retrieve ${unit} — please do it manually.`);
-                } else {
-                    console.log(`⏭️ Skipped retrieve for unit ${unit} (user cancelled).`);
-                }
-                state.isProcessingRelease = false;
-            }
-        } catch (error) {
-            console.error('❌ Release poll error:', error.message);
-            state.isProcessingRelease = false;
-        }
-    }
 
     function checkStatus() {
         console.log('\n📊 STATUS — GALLERIA 1');
@@ -279,7 +151,6 @@
 
     window.startValetListener = startListener;
     window.stopValetListener  = stopListener;
-    window.startReleaseListener = startReleaseListener;
     window.valetStatus        = checkStatus;
     window.valetClearCache    = clearCache;
     window.addUnit            = addUnit;
@@ -293,21 +164,17 @@
   stopValetListener()   - Stop
   valetStatus()         - Show status
 
-📝 SETUP CHECKLIST:
-  ✅ Server URL set to: ${SERVER_URL}
+📝 SETUP:
+  ✅ Server: ${SERVER_URL}
   ✅ Building: GALLERIA 1
-  ✅ Release listener started automatically
-  ✅ Click "ADD DELIVERY" button then startValetListener() for deliveries
-⚠️  Update SERVER_URL every time you restart the ngrok server.
+  ✅ Click "ADD DELIVERY" then startValetListener()
 ╔════════════════════════════════════════════════════════════╝
     `);
 
-    startReleaseListener();
-
     if (CONFIG.autoStart) {
-        console.log('🔄 Auto-starting delivery listener in 3s (open ADD DELIVERY popup first)...\n');
+        console.log('🔄 Auto-starting in 3s (open ADD DELIVERY popup first)...\n');
         setTimeout(startListener, 3000);
     } else {
-        console.log('💡 Run startValetListener() to begin delivery polling\n');
+        console.log('💡 Run startValetListener() to begin\n');
     }
 })();
