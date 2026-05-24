@@ -31,32 +31,7 @@
 
 ### OCR extraction pipeline — label photo to structured data in under 15 seconds
 
-```console
-$ python ocr_utils.py uploads/label.jpg
-
-============================================================
-ANALYZING: label.jpg
-============================================================
-
-Sending image to Gemini Vision API...
-
-============================================================
-FINAL EXTRACTION RESULT
-============================================================
-  Unit:        2401
-  Name:        Jordan Park
-  Supplier:    AMAZON
-  Type:        PRIME BLUE PACKAGE
-============================================================
-
-JSON OUTPUT:
-{
-  "unit": "2401",
-  "name": "Jordan Park",
-  "supplier": "AMAZON",
-  "parcel_type": "PRIME BLUE PACKAGE"
-}
-```
+![ParcelVision OCR Pipeline Demo](./demo.svg)
 
 ### Server startup — tunnel + Flask + URL stamp in one command
 
