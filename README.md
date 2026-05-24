@@ -1,6 +1,127 @@
 # ParcelVision — Automated Parcel Intake System
 
+![Python](https://img.shields.io/badge/python-3.11-3776AB?style=flat&logo=python&logoColor=white)
+![Status](https://img.shields.io/badge/status-production-brightgreen?style=flat)
+![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
+![Buildings](https://img.shields.io/badge/buildings-2-orange?style=flat)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Git%20Bash-lightgrey?style=flat)
+![Last Commit](https://img.shields.io/github/last-commit/blacks1k-sc/parcelvision?style=flat)
+
 > Built by a CS student working part-time as a concierge. Reverse-engineered a proprietary smart locker system with no public API, no vendor SDK, and no documentation. Approved by the property manager and deployed across two residential buildings.
+
+---
+
+## Table of Contents
+
+- [Live Demo](#live-demo)
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Upload Pipeline](#upload-pipeline)
+- [Multi-Building Routing](#multi-building-routing)
+- [OCR Pipeline](#ocr-pipeline)
+- [1Valet Integration — No API Required](#1valet-integration--no-api-required)
+- [Tech Stack](#tech-stack)
+- [Buildings](#buildings)
+- [Project Structure](#project-structure)
+- [Setup](#setup)
+
+---
+
+## Live Demo
+
+### OCR extraction pipeline — label photo to structured data in under 15 seconds
+
+```console
+$ python ocr_utils.py uploads/label.jpg
+
+============================================================
+ANALYZING: label.jpg
+============================================================
+
+Sending image to Gemini Vision API...
+
+============================================================
+FINAL EXTRACTION RESULT
+============================================================
+  Unit:        2401
+  Name:        Jordan Park
+  Supplier:    AMAZON
+  Type:        PRIME BLUE PACKAGE
+============================================================
+
+JSON OUTPUT:
+{
+  "unit": "2401",
+  "name": "Jordan Park",
+  "supplier": "AMAZON",
+  "parcel_type": "PRIME BLUE PACKAGE"
+}
+```
+
+### Server startup — tunnel + Flask + URL stamp in one command
+
+```console
+$ ./start.sh
+
+============================================================
+  ParcelVision -- Starting up
+============================================================
+
+  Starting Flask server (app2.py) on port 5002...
+  Waiting for Flask to be ready...
+  [OK] Flask is ready on port 5002.
+  Trying SSH tunnel via serveo.net...
+  [OK] Tunnel active: https://a3f92b1c.serveo.net
+  [OK] smartlockerscript.txt updated with: https://a3f92b1c.serveo.net
+  [OK] smartlockerscript_g1.txt updated with: https://a3f92b1c.serveo.net
+
+============================================================
+  Flask     : http://localhost:5002
+
+  >>> PUBLIC URL (phone + SmartLocker scripts): <<<
+      https://a3f92b1c.serveo.net
+
+  Paste smartlockerscript.txt     -> G2 1Valet tab
+  Paste smartlockerscript_g1.txt  -> G1 1Valet tab
+
+  Press Ctrl+C to stop
+============================================================
+```
+
+### Full request cycle — photo capture to 1Valet portal entry
+
+```console
+[14:32:01] Flask  • POST /upload building=g2 size=1.8MB -> 202 job_id=f4a3c8bb
+[14:32:01] OCR    • preprocessing: upscale 2x · denoise (NL means) · CLAHE · sharpen
+[14:32:02] OCR    • sending image to Gemini Vision API...
+[14:32:04] OCR    • Unit=2401 Name=Jordan Park Supplier=AMAZON
+[14:32:04] Sheets • row appended (g2) 2401 · Jordan Park · AMAZON · PRIME BLUE PACKAGE
+[14:32:04] Queue  • g2 queue size: 1
+[14:32:09] Valet  • GET /valet/pending?building=g2 -> 1 unit(s)
+[14:32:09] Valet  • Processing: 2401 (Jordan Park)
+[14:32:11] Valet  • Unit 2401 complete. Remaining: 0
+```
+
+### 1Valet browser listener — active in G2 tab console
+
+```console
+============================================================
+1VALET AUTO-LISTENER STARTED -- GALLERIA 2
+============================================================
+Polling: https://a3f92b1c.serveo.net
+Interval: 5s
+Keep popup open!
+Stop with: stopValetListener()
+============================================================
+
+Found 1 pending unit(s)
+Processing: 2401 (Jordan Park)
+  Typed: 2401
+  Selected: 2401
+Unit added.
+Re-focused input for next entry.
+Notified server: 2401 complete
+```
 
 ---
 
@@ -9,22 +130,6 @@
 ParcelVision automates parcel intake at multi-building residential properties. Concierge staff photograph shipping labels from a mobile browser — the system extracts the unit number, recipient name, courier, and parcel type, logs to Google Sheets, and queues the unit for automatic entry into the 1Valet smart locker portal.
 
 **Full cycle: under 15 seconds. Zero manual re-entry.**
-
----
-
-## Live UI
-
-<div align="center">
-
-| Upload Screen | Extraction Result |
-|:---:|:---:|
-| Mobile-first dark UI | Real-time result card |
-| Camera capture + drag-and-drop | Unit · Name · Courier · Parcel Type |
-| Building toggle (G1 / G2) | Auto-logged to Google Sheets |
-
-</div>
-
-The interface is served by Flask and accessible from any phone on the network or via public SSH tunnel — no app install required.
 
 ---
 
@@ -54,7 +159,7 @@ graph TD
     L -->|DOM automation| N[1Valet Portal G2]
     M -->|DOM automation| O[1Valet Portal G1]
 
-    P[SSH Tunnel\nserveo.net] -->|reverse proxy :80→:5002| B
+    P[SSH Tunnel\nserveo.net] -->|reverse proxy :80 -> :5002| B
 ```
 
 ---
@@ -72,7 +177,7 @@ sequenceDiagram
     Phone->>Flask: POST /upload (image + building)
     Flask-->>Phone: 202 { job_id }
     Flask->>OCR: analyze_parcel(image)
-    Note over OCR: Gemini primary → focused retry → pytesseract fallback
+    Note over OCR: Gemini primary -> focused retry -> pytesseract fallback
     OCR-->>Flask: { unit, name, supplier, parcel_type }
     Flask->>Sheets: append_row(building=g1|g2)
     Flask->>Queue: pending_units_queue[building].append(unit)
@@ -117,7 +222,7 @@ Each building has its own Google Sheet, service account credentials, and 1Valet 
 flowchart TD
     IMG[Label Image] --> PRE[Preprocessing\nOpenCV: denoise · CLAHE · sharpen]
     PRE --> G[Gemini 2.5 Flash\nVision API]
-    G -->|Valid JSON| NRM[Normalize + Validate\n_normalize]
+    G -->|Valid JSON| NRM[Normalize + Validate]
     G -->|Partial / truncated| SAL[Salvage via regex]
     SAL --> NRM
     NRM -->|unit or name = UNKNOWN| RET[Focused Retry\nSecond Gemini call]
@@ -131,13 +236,13 @@ flowchart TD
 
 | Type | Detected as |
 |---|---|
-| Amazon blue poly mailer | PRIME BLUE PACKAGE |
-| Amazon orange packaging | PRIME ORANGE PACKAGE |
-| Amazon cardboard box | AMAZON BOX |
-| Brown cardboard box | BROWN BOX |
+| Amazon blue poly mailer | `PRIME BLUE PACKAGE` |
+| Amazon orange packaging | `PRIME ORANGE PACKAGE` |
+| Amazon cardboard box | `AMAZON BOX` |
+| Brown cardboard box | `BROWN BOX` |
 | White / black / blue / pink / grey soft bag | `<COLOR> PACKAGE` |
-| White / black / blue / pink box | `<COLOR> BOX` |
-| Transparent poly bag | CLEAR PACKAGE |
+| White / black / blue / pink rigid box | `<COLOR> BOX` |
+| Transparent poly bag | `CLEAR PACKAGE` |
 
 ---
 
@@ -150,7 +255,7 @@ flowchart TD
 3. **Polling queue** — Flask maintains a per-building queue; the injected script polls every 5 seconds, processes one unit at a time, and calls `/valet/complete` to dequeue
 4. **Re-focus logic** — after each unit is entered, the input field is re-focused so the popup stays open for the next entry
 
-The script is self-contained — copy it from `smartlockerscript.txt` (G2) or `smartlockerscript_g1.txt` (G1) and paste into the 1Valet browser tab console.
+The script is self-contained — copy it from `smartlockerscript.txt` (G2) or `smartlockerscript_g1.txt` (G1) and paste into the 1Valet browser tab console. `start.sh` stamps the current tunnel URL into both files on every run.
 
 ---
 
@@ -160,10 +265,10 @@ The script is self-contained — copy it from `smartlockerscript.txt` (G2) or `s
 |---|---|
 | Backend | Python · Flask · Flask-SocketIO |
 | Vision / OCR | Gemini 2.5 Flash · OpenCV · pytesseract |
-| Image preprocessing | OpenCV (CLAHE · denoise · sharpen) |
+| Image preprocessing | OpenCV (CLAHE · denoise · sharpen · upscale) |
 | Data logging | Google Sheets · gspread · oauth2client |
 | Browser automation | Vanilla JS · DOM introspection · event simulation |
-| Tunnel / ingress | serveo.net SSH reverse proxy (zero config) |
+| Tunnel / ingress | serveo.net SSH reverse proxy (zero config, zero cost) |
 | Async jobs | Threading · in-memory dict queue · HTTP polling |
 | Frontend | HTML · CSS · Vanilla JS (no framework) |
 | Environment | Windows · Git Bash · Python venv |
@@ -172,7 +277,7 @@ The script is self-contained — copy it from `smartlockerscript.txt` (G2) or `s
 
 ## Buildings
 
-| ID | Building | Sheet | Script |
+| ID | Building | Credentials | Script |
 |---|---|---|---|
 | `g2` | Galleria 2 — 10 Graphophone Grove | `credentials.json` | `smartlockerscript.txt` |
 | `g1` | Galleria 1 — 1285 Dupont St | `credentials_g1.json` | `smartlockerscript_g1.txt` |
@@ -186,7 +291,7 @@ ParcelVision/
   start.sh                      one-command startup: tunnel + Flask + URL stamp
   backend/
     app2.py                     Flask server — /upload, /result, /valet endpoints
-    ocr_utils.py                Vision pipeline: Gemini → retry → pytesseract
+    ocr_utils.py                Vision pipeline: Gemini -> retry -> pytesseract
     vision_utils.py             Thin wrapper around ocr_utils
     sheet_utils.py              Google Sheets writer — dual-building support
     smartlockerscript.txt       G2 browser automation (SERVER_URL stamped at runtime)
@@ -238,14 +343,14 @@ Drop `credentials.json` (G2) and `credentials_g1.json` (G1) into `backend/`. Sha
 ./start.sh
 ```
 
-This creates an SSH tunnel via serveo.net, stamps the public URL into both SmartLocker scripts, and starts Flask on port 5002. The terminal prints the public URL for the phone.
+Creates an SSH tunnel via serveo.net, stamps the public URL into both SmartLocker scripts, and starts Flask on port 5002. The terminal prints the public URL for the phone.
 
 **5. 1Valet automation**
 
-Open the 1Valet "Add Delivery" popup in the browser tab, then paste the contents of `smartlockerscript.txt` (G2) or `smartlockerscript_g1.txt` (G1) into the browser console. The listener auto-starts in 3 seconds.
+Open the 1Valet "Add Delivery" popup in the browser, then paste the contents of `smartlockerscript.txt` (G2) or `smartlockerscript_g1.txt` (G1) into the browser console. Listener auto-starts in 3 seconds.
 
 ---
 
 ## Deployment Note
 
-This runs on a Windows concierge desk PC via Git Bash. Flask is exposed publicly via a free serveo.net SSH tunnel — no cloud infrastructure, no DNS config, no cost. The system has been running in production across two residential buildings since deployment.
+Runs on a Windows concierge desk PC via Git Bash. Flask is exposed publicly via a free serveo.net SSH tunnel — no cloud infrastructure, no DNS config, no cost. Running in production across two residential buildings, approved and adopted as the standard workflow by the property manager.
