@@ -72,9 +72,11 @@ def guess_parcel_type(image_path: str) -> str:
         color = "BLACK"
     elif r > 200 and g > 200 and b > 200:
         color = "WHITE"
-    elif r > 200 and g > 180 and b < 130:
-        color = "YELLOW"
-    elif abs(r - g) < 15 and abs(g - b) < 15:
+    elif b > r + 30 and b > g + 20 and b > 100:
+        color = "BLUE"
+    elif r > 180 and b > 140 and g < r - 40:
+        color = "PINK"
+    elif abs(r - g) < 20 and abs(g - b) < 20 and r > 100:
         color = "GREY"
     else:
         color = "BROWN"
@@ -154,7 +156,7 @@ def fallback_regex_ocr(image_path: str) -> Dict:
         config = r"--oem 3 --psm 6"
         text = pytesseract.image_to_string(preprocessed, config=config).upper()
     except (FileNotFoundError, Exception) as e:
-        print(f"⚠️ pytesseract unavailable: {e}")
+        print(f"[WARN] pytesseract unavailable: {e}")
     finally:
         if preprocessed != image_path:
             try:
@@ -214,9 +216,22 @@ Rules for "name":
 - If the label shows both a company and a person's name, return the person's name.
 - If only a company name is present (no individual), use "UNKNOWN".
 
-Other rules:
-- "supplier": Match courier branding/logo to the list above.
-- "parcel_type": Describe physical package colour and form.
+Rules for "supplier":
+- Match courier branding, logo, or label text to the list above.
+- If the courier is not in the list but is clearly readable, still return it as written (e.g. UNIQLO, FLEETOPTICS, ECOMLOGISTICS).
+- If unidentifiable, use "OTHER".
+
+Rules for "parcel_type":
+- Identify the COLOR and FORM of the physical packaging.
+- FORM: Use "PACKAGE" for soft bags, poly mailers, padded envelopes, or plastic pouches. Use "BOX" for rigid cardboard boxes.
+- COLOR options: BROWN, WHITE, BLACK, BLUE, PINK, GREY, CLEAR
+- Use "CLEAR PACKAGE" for transparent or see-through plastic poly bags.
+- Amazon-specific exceptions (only when Amazon/Prime branding is visible):
+  - Amazon blue poly mailer or bag -> "PRIME BLUE PACKAGE"
+  - Amazon orange packaging -> "PRIME ORANGE PACKAGE"
+  - Amazon brown cardboard box with Prime/Amazon logo -> "AMAZON BOX"
+- Standard examples: "BROWN BOX", "WHITE PACKAGE", "BLACK PACKAGE", "BLUE BOX", "PINK PACKAGE", "GREY PACKAGE"
+- NEVER use words like "bag", "polybag", "mailer", "envelope" — always use PACKAGE or BOX.
 - Return ONLY the JSON object. No markdown, no explanation."""
 
 
@@ -263,7 +278,7 @@ def extract_with_gemini(image_path: str) -> Dict:
         },
     }
 
-    print("🤖 Sending image to Gemini Vision API...")
+    print("Sending image to Gemini Vision API...")
     response = requests.post(url, json=payload, timeout=45)
 
     if response.status_code != 200:
@@ -288,7 +303,7 @@ def extract_with_gemini(image_path: str) -> Dict:
             pass
 
     # Gemini output was truncated — salvage field values with targeted regex
-    print(f"⚠️ JSON parse failed — salvaging fields from partial output:\n{raw}")
+    print(f"[WARN] JSON parse failed — salvaging fields from partial output:\n{raw}")
     data = {}
     for field in ("unit", "name", "supplier", "parcel_type"):
         m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
@@ -310,7 +325,7 @@ def _normalize(data: Dict, image_path: str) -> Dict:
     unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
 
     # Known building street numbers — reject if Gemini returned one of these
-    _STREET_NUMBERS = {"19", "1285"}
+    _STREET_NUMBERS = {"10", "1285"}
     if unit_candidate in _STREET_NUMBERS:
         unit_candidate = "UNKNOWN"
 
@@ -325,12 +340,8 @@ def _normalize(data: Dict, image_path: str) -> Dict:
     data["name"] = name.title() if name and name.upper() != "UNKNOWN" else "UNKNOWN"
 
     # --- Supplier ---
-    valid_suppliers = {
-        "AMAZON", "UPS", "FEDEX", "UNI", "DRAGONFLY", "EMILE", "FLEETOPTICS",
-        "DHL", "PUROLATOR", "INTELCOM", "CANPAR", "CANADA POST",
-    }
     supplier = str(data.get("supplier", "OTHER")).strip().upper()
-    data["supplier"] = supplier if supplier in valid_suppliers else "OTHER"
+    data["supplier"] = supplier if supplier else "OTHER"
 
     # --- Parcel type ---
     data["parcel_type"] = str(data.get("parcel_type", "")).strip().upper() or guess_parcel_type(image_path)
@@ -420,15 +431,15 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
             m = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
             if m:
                 current["unit"] = m.group(1)
-                print(f"  🔄 Retry resolved unit: {current['unit']}")
+                print(f"  Retry resolved unit: {current['unit']}")
 
         if current.get("name") == "UNKNOWN":
             name = str(retry_data.get("name", "")).strip()
             if name and name.upper() not in ("UNKNOWN", ""):
                 current["name"] = name.title()
-                print(f"  🔄 Retry resolved name: {current['name']}")
+                print(f"  Retry resolved name: {current['name']}")
     except Exception as e:
-        print(f"  ⚠️ Focused retry failed: {e}")
+        print(f"  [WARN] Focused retry failed: {e}")
 
     return current
 
@@ -442,13 +453,13 @@ def extract_data(image_path: str) -> Dict:
     Unified interface: Gemini first → focused retry → fallback OCR.
     """
     print(f"\n{'='*60}")
-    print(f"🔍 ANALYZING: {os.path.basename(image_path)}")
+    print(f"ANALYZING: {os.path.basename(image_path)}")
     print(f"{'='*60}\n")
 
     try:
         result = extract_with_gemini(image_path)
     except Exception as e:
-        print(f"⚠️ Gemini failed: {e}\nUsing fallback OCR...")
+        print(f"[WARN] Gemini failed: {e}\nUsing fallback OCR...")
         result = fallback_regex_ocr(image_path)
 
     # Second pass: focused retry for any remaining UNKNOWN fields
@@ -457,18 +468,18 @@ def extract_data(image_path: str) -> Dict:
     # Final fallback fill for any still-missing fields
     for key in ["unit", "name", "supplier", "parcel_type"]:
         if not result.get(key) or result[key] == "UNKNOWN":
-            print(f"⚠️ {key} still unknown — filling via OCR fallback...")
+            print(f"[WARN] {key} still unknown — filling via OCR fallback...")
             backup = fallback_regex_ocr(image_path)
             if backup.get(key) and backup[key] != "UNKNOWN":
                 result[key] = backup[key]
 
     print(f"\n{'='*60}")
-    print("✅ FINAL EXTRACTION RESULT")
+    print("FINAL EXTRACTION RESULT")
     print(f"{'='*60}")
-    print(f"  📍 Unit:        {result.get('unit', 'UNKNOWN')}")
-    print(f"  👤 Name:        {result.get('name', 'UNKNOWN')}")
-    print(f"  🚚 Supplier:    {result.get('supplier', 'UNKNOWN')}")
-    print(f"  📦 Type:        {result.get('parcel_type', 'UNKNOWN')}")
+    print(f"  Unit:        {result.get('unit', 'UNKNOWN')}")
+    print(f"  Name:        {result.get('name', 'UNKNOWN')}")
+    print(f"  Supplier:    {result.get('supplier', 'UNKNOWN')}")
+    print(f"  Type:        {result.get('parcel_type', 'UNKNOWN')}")
     print(f"{'='*60}\n")
 
     return result
@@ -486,9 +497,9 @@ if __name__ == "__main__":
 
     path = sys.argv[1]
     if not os.path.exists(path):
-        print(f"❌ File not found: {path}")
+        print(f"File not found: {path}")
         sys.exit(1)
 
     result = extract_data(path)
-    print("\n📋 JSON OUTPUT:")
+    print("\nJSON OUTPUT:")
     print(json.dumps(result, indent=2))
