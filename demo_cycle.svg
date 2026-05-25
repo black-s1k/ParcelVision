@@ -1,0 +1,28 @@
+<svg width="680" height="262" viewBox="0 0 680 262" xmlns="http://www.w3.org/2000/svg">
+  <rect width="680" height="262" rx="10" fill="#0d1117"/>
+  <rect width="680" height="36" rx="10" fill="#161b22"/>
+  <rect y="26" width="680" height="10" fill="#161b22"/>
+  <line x1="0" y1="36" x2="680" y2="36" stroke="#30363d" stroke-width="1"/>
+  <circle cx="22" cy="18" r="6" fill="#ff5f56"/>
+  <circle cx="42" cy="18" r="6" fill="#ffbd2e"/>
+  <circle cx="62" cy="18" r="6" fill="#27c93f"/>
+  <text x="340" y="23" text-anchor="middle" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12" fill="#6e7681">parcelvision &#x2014; request cycle</text>
+
+  <g><text x="24" y="58" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:01] Flask  &#x2022; </tspan><tspan fill="#e6edf3">POST /upload building=g2 size=1.8MB -&gt; 202 job_id=f4a3c8bb</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.0357;0.0500;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="78" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:01] OCR    &#x2022; </tspan><tspan fill="#e6edf3">preprocessing: upscale 2x &#xB7; denoise &#xB7; CLAHE &#xB7; sharpen</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.1071;0.1214;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="98" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:02] OCR    &#x2022; </tspan><tspan fill="#e6edf3">sending image to Vision API...</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.2143;0.2286;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="118" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:04] OCR    &#x2022; </tspan><tspan fill="#3fb950">Unit=2401  Name=Jordan Park  Supplier=AMAZON</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.4286;0.4429;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="138" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:04] Sheets &#x2022; </tspan><tspan fill="#e6edf3">row appended 2401 &#xB7; Jordan Park &#xB7; AMAZON &#xB7; PRIME BLUE PACKAGE</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.4643;0.4786;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="158" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:04] Queue  &#x2022; </tspan><tspan fill="#e6edf3">g2 queue size: 1</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5000;0.5143;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="178" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:09] Valet  &#x2022; </tspan><tspan fill="#e6edf3">GET /valet/pending?building=g2 -&gt; 1 unit(s)</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6429;0.6571;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="198" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:09] Valet  &#x2022; </tspan><tspan fill="#e6edf3">Processing: 2401 (Jordan Park)</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.6786;0.6929;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+
+  <g><text x="24" y="218" font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace" font-size="12"><tspan fill="#8b949e">[14:32:11] Valet  &#x2022; </tspan><tspan fill="#3fb950">Unit 2401 complete. Remaining: 0</tspan></text><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.7857;0.8000;0.8571;1" dur="14s" repeatCount="indefinite"/></g>
+</svg>

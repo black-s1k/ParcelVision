@@ -35,68 +35,15 @@
 
 ### Server startup — tunnel + Flask + URL stamp in one command
 
-```console
-$ ./start.sh
-
-============================================================
-  ParcelVision -- Starting up
-============================================================
-
-  Starting Flask server (app2.py) on port 5002...
-  Waiting for Flask to be ready...
-  [OK] Flask is ready on port 5002.
-  Trying SSH tunnel via serveo.net...
-  [OK] Tunnel active: https://a3f92b1c.serveo.net
-  [OK] smartlockerscript.txt updated with: https://a3f92b1c.serveo.net
-  [OK] smartlockerscript_g1.txt updated with: https://a3f92b1c.serveo.net
-
-============================================================
-  Flask     : http://localhost:5002
-
-  >>> PUBLIC URL (phone + SmartLocker scripts): <<<
-      https://a3f92b1c.serveo.net
-
-  Paste smartlockerscript.txt     -> G2 1Valet tab
-  Paste smartlockerscript_g1.txt  -> G1 1Valet tab
-
-  Press Ctrl+C to stop
-============================================================
-```
+![ParcelVision Server Startup Demo](./demo_start.svg)
 
 ### Full request cycle — photo capture to 1Valet portal entry
 
-```console
-[14:32:01] Flask  • POST /upload building=g2 size=1.8MB -> 202 job_id=f4a3c8bb
-[14:32:01] OCR    • preprocessing: upscale 2x · denoise (NL means) · CLAHE · sharpen
-[14:32:02] OCR    • sending image to Gemini Vision API...
-[14:32:04] OCR    • Unit=2401 Name=Jordan Park Supplier=AMAZON
-[14:32:04] Sheets • row appended (g2) 2401 · Jordan Park · AMAZON · PRIME BLUE PACKAGE
-[14:32:04] Queue  • g2 queue size: 1
-[14:32:09] Valet  • GET /valet/pending?building=g2 -> 1 unit(s)
-[14:32:09] Valet  • Processing: 2401 (Jordan Park)
-[14:32:11] Valet  • Unit 2401 complete. Remaining: 0
-```
+![ParcelVision Request Cycle Demo](./demo_cycle.svg)
 
 ### 1Valet browser listener — active in G2 tab console
 
-```console
-============================================================
-1VALET AUTO-LISTENER STARTED -- GALLERIA 2
-============================================================
-Polling: https://a3f92b1c.serveo.net
-Interval: 5s
-Keep popup open!
-Stop with: stopValetListener()
-============================================================
-
-Found 1 pending unit(s)
-Processing: 2401 (Jordan Park)
-  Typed: 2401
-  Selected: 2401
-Unit added.
-Re-focused input for next entry.
-Notified server: 2401 complete
-```
+![ParcelVision 1Valet Listener Demo](./demo_valet.svg)
 
 ---
 
