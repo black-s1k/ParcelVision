@@ -25,7 +25,7 @@
       <tspan fill="#e6edf3"> python ocr_utils.py uploads/label.jpg</tspan>
     </text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.0556;0.0667;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.0556;0.0667;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -33,7 +33,7 @@
           font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
           font-size="13" fill="#388bfd">============================================================</text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.1111;0.1222;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.1111;0.1222;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -43,7 +43,7 @@
       <tspan fill="#e6edf3">label.jpg</tspan>
     </text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.1278;0.1389;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.1278;0.1389;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -51,7 +51,7 @@
           font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
           font-size="13" fill="#388bfd">============================================================</text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.1444;0.1556;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.1444;0.1556;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -59,7 +59,7 @@
           font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
           font-size="13" fill="#8b949e">Sending image to Vision API...</text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.1667;0.1778;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.1667;0.1778;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -67,7 +67,7 @@
           font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
           font-size="13" fill="#388bfd">============================================================</text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.3611;0.3722;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.3611;0.3722;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -75,7 +75,7 @@
           font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
           font-size="13" fill="#3fb950">FINAL EXTRACTION RESULT</text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.3778;0.3889;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.3778;0.3889;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -83,7 +83,7 @@
           font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
           font-size="13" fill="#388bfd">============================================================</text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.3889;0.4000;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.3889;0.4000;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -93,7 +93,7 @@
       <tspan fill="#e6edf3">2401</tspan>
     </text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.4167;0.4278;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.4167;0.4278;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -103,7 +103,7 @@
       <tspan fill="#e6edf3">Jordan Park</tspan>
     </text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.4444;0.4556;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.4444;0.4556;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -113,7 +113,7 @@
       <tspan fill="#e6edf3">AMAZON</tspan>
     </text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.4722;0.4833;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.4722;0.4833;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -123,7 +123,7 @@
       <tspan fill="#e6edf3">PRIME BLUE PACKAGE</tspan>
     </text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.5000;0.5111;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.5000;0.5111;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -131,7 +131,7 @@
           font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
           font-size="13" fill="#388bfd">============================================================</text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.5278;0.5389;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.5278;0.5389;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <g>
@@ -141,14 +141,14 @@
       <tspan fill="#e6edf3"> </tspan>
     </text>
     <animate attributeName="opacity" values="0;0;1;1;0"
-             keyTimes="0;0.5833;0.5944;0.8333;1" dur="13s" repeatCount="indefinite"/>
+             keyTimes="0;0.5833;0.5944;0.8333;1" dur="10s" repeatCount="indefinite"/>
   </g>
 
   <rect x="37" y="348" width="8" height="15" rx="1" fill="#3fb950">
     <animate attributeName="opacity"
              values="0;0;1;0;1;0;1;0;1;0;1;0;1;0;0"
              keyTimes="0;0.5833;0.5944;0.6278;0.6611;0.6944;0.7278;0.7611;0.7944;0.8000;0.8111;0.8222;0.8278;0.8333;1"
-             dur="13s" repeatCount="indefinite"/>
+             dur="10s" repeatCount="indefinite"/>
   </rect>
 
 </svg>
