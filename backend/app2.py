@@ -141,7 +141,7 @@ def upload_parcel():
                 timestamp_safe     = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
                 append_row(
-                    [timestamp_readable, unit, name, supplier, parcel_type, False, ""],
+                    [timestamp_readable, unit, name, supplier, parcel_type, "FALSE", ""],
                     building=building,
                 )
                 print(f"[{job_id}] Sheets written ({building})")
@@ -181,7 +181,7 @@ def upload_parcel():
                 print(f"[{job_id}] Done")
 
             except Exception as e:
-                traceback.print_exc()
+                traceback.print_exc()  
                 if os.path.exists(temp_path):
                     try:
                         os.remove(temp_path)
