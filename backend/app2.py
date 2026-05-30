@@ -49,7 +49,7 @@ CORS_ORIGINS = [
 _ws_origins = [o for o in CORS_ORIGINS if o]
 socketio = SocketIO(app, cors_allowed_origins=_ws_origins, async_mode="threading")
 
-# ── Per-building queues ──────────────────────────────────────────────
+# ── Per-building queues ────────────────────────────────────
 pending_units_queue: dict = {"g1": [], "g2": []}
 
 # Job results store for async upload processing
@@ -59,7 +59,7 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# ── CORS (HTTP endpoints — handle both 1Valet origins) ────────────────────
+# ── CORS (HTTP endpoints — handle both 1Valet origins) ──────────────────
 def _allowed_origin(origin: str) -> bool:
     return origin in CORS_ORIGINS
 
@@ -78,7 +78,7 @@ def valet_preflight(subpath):
     return "", 204
 
 
-# ── SocketIO: building-specific rooms ─────────────────────────────────────
+# ── SocketIO: building-specific rooms ─────────────────────────────
 @socketio.on("join_building")
 def on_join_building(data):
     building = data.get("building", "g2")
@@ -141,7 +141,7 @@ def upload_parcel():
                 timestamp_safe     = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
                 append_row(
-                    [timestamp_readable, unit, name, supplier, parcel_type, "", ""],
+                    [timestamp_readable, unit, name, supplier, parcel_type, False, ""],
                     building=building,
                 )
                 print(f"[{job_id}] Sheets written ({building})")
