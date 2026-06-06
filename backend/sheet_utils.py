@@ -50,7 +50,7 @@ def append_row(row_data, building: str = "g2"):
             f"Expected: [timestamp, unit, name, supplier, parcel_type, released?, released_time]"
         )
 
-    sheet.append_row(row_data, value_input_option="USER_ENTERED")
+    sheet.append_row(row_data, value_input_option="RAW")
 
     print(f"[{building.upper()}] Added new parcel entry")
     return row_data
