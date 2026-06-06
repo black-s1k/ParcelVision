@@ -176,7 +176,7 @@ def upload_parcel():
                 timestamp_safe     = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
                 append_row(
-                    [timestamp_readable, unit, name, supplier, parcel_type, False, ""],
+                    [timestamp_readable, unit, name, supplier, parcel_type],
                     building=building,
                 )
                 print(f"[{job_id}] Sheets written ({building})")

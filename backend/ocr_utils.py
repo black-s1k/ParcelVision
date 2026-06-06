@@ -190,49 +190,51 @@ def fallback_regex_ocr(image_path: str) -> Dict:
 # --- GEMINI EXTRACTION ------------------------------------------------
 # ----------------------------------------------------------------------
 
-_GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Your job is to extract key fields from the RECIPIENT (delivery-to) address — NOT the sender/return address.
+_GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Extract fields from the RECIPIENT (ship-to) address only — NOT the sender/return/from address.
 
-Extract and return ONLY a JSON object with exactly these fields:
-
+Return ONLY a JSON object with exactly these four fields:
 {
-  "unit": "<apartment, suite, or unit number — 2-4 digits with optional letter, e.g. 204, 1911, 204A, 1911B>",
-  "name": "<recipient's full personal name, e.g. John Smith — NOT a company name>",
-  "supplier": "<one of: AMAZON, UPS, FEDEX, UNI, DRAGONFLY, EMILE, FLEETOPTICS, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER>",
-  "parcel_type": "<color + type, e.g. BROWN BOX, WHITE PACKAGE, GREY PACKAGE>"
+  "unit": "<apartment or suite number>",
+  "name": "<recipient full personal name>",
+  "supplier": "<courier>",
+  "parcel_type": "<color + BOX or PACKAGE>"
 }
 
-Rules for "unit":
-- The unit/suite number is a SHORT number (typically 2-4 digits, e.g. 204, 1011, 1911).
-- The civic/street number (e.g. the "19" in "19 Graphophone Grove" or "1285" in "1285 Dupont St") is NOT the unit. Do NOT return the street number as the unit.
-- If the address line contains both a street number and a unit (e.g. "1285 Dupont St, Suite 204"), return only the suite/unit portion (204).
-- Look for keywords: APT, UNIT, SUITE, #, or a number appearing AFTER the street name (not before it).
-- Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
-- Include any trailing letter suffix (204A stays 204A).
-- If no unit found, use "UNKNOWN".
+BUILDING CONTEXT — these labels are for two residential buildings in Toronto:
+  • 10 Graphophone Grove  (building number = 10,   apartment units are 3–4 digits, e.g. 1204, 2406)
+  • 1285 Dupont St        (building number = 1285,  apartment units are 3–4 digits, e.g. 504, 1106)
 
-Rules for "name":
-- Must be a personal name (First Last). NOT a company, building, or courier name.
-- Look for prefixes like "ATTN:", "C/O:", "Attention:", or "Care of:" — the name immediately follows.
-- If the label shows both a company and a person's name, return the person's name.
-- If only a company name is present (no individual), use "UNKNOWN".
+ADDRESS FORMAT on these labels often reads:  <UNIT>  <BUILDING#>  <STREET NAME>
+  2406 10 GRAPHOPHONE GROVE   →  unit = 2406   (10 is the building, not the unit)
+  1507 1285 DUPONT ST         →  unit = 1507   (1285 is the building, not the unit)
+  SUITE 804, 10 GRAPHOPHONE   →  unit = 804
 
-Rules for "supplier":
-- Match courier branding, logo, or label text to the list above.
-- If the courier is not in the list but is clearly readable, still return it as written (e.g. UNIQLO, FLEETOPTICS, ECOMLOGISTICS).
-- If unidentifiable, use "OTHER".
+UNIT rules:
+- Must be 3–4 digits (100–9999), with an optional trailing letter (e.g. 204A).
+- The numbers 10 and 1285 are always the building/street number — NEVER the unit.
+- Any number under 100 is NOT an apartment unit.
+- Canadian postal codes (e.g. M6H 0E5), tracking numbers, and barcodes are NOT units.
+- If genuinely absent, return "UNKNOWN".
 
-Rules for "parcel_type":
-- Identify the COLOR and FORM of the physical packaging.
-- FORM: Use "PACKAGE" for soft bags, poly mailers, padded envelopes, or plastic pouches. Use "BOX" for rigid cardboard boxes.
-- COLOR options: BROWN, WHITE, BLACK, BLUE, PINK, GREY, CLEAR
-- Use "CLEAR PACKAGE" for transparent or see-through plastic poly bags.
-- Amazon-specific exceptions (only when Amazon/Prime branding is visible):
-  - Amazon blue poly mailer or bag -> "PRIME BLUE PACKAGE"
-  - Amazon orange packaging -> "PRIME ORANGE PACKAGE"
-  - Amazon brown cardboard box with Prime/Amazon logo -> "AMAZON BOX"
-- Standard examples: "BROWN BOX", "WHITE PACKAGE", "BLACK PACKAGE", "BLUE BOX", "PINK PACKAGE", "GREY PACKAGE"
-- NEVER use words like "bag", "polybag", "mailer", "envelope" — always use PACKAGE or BOX.
-- Return ONLY the JSON object. No markdown, no explanation."""
+NAME rules:
+- Personal name only (First Last). Never a company, building name, or courier.
+- Check the line immediately after "SHIP TO:", "TO:", "ATTN:", or "C/O:".
+- If the label has both a company and a person, return the person.
+- If only a company name exists, return "UNKNOWN".
+
+SUPPLIER — pick one:
+  AMAZON, UPS, FEDEX, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER
+
+PARCEL TYPE:
+- FORM: PACKAGE (soft bag, poly mailer, padded envelope) or BOX (rigid cardboard)
+- COLOR: BROWN, WHITE, BLACK, BLUE, PINK, GREY, CLEAR
+- Amazon exceptions (only with visible Amazon/Prime branding):
+    blue poly mailer  → PRIME BLUE PACKAGE
+    orange wrap       → PRIME ORANGE PACKAGE
+    brown box         → AMAZON BOX
+- Never use "bag", "mailer", or "envelope".
+
+Return ONLY the JSON. No markdown. No explanation."""
 
 
 def extract_with_gemini(image_path: str) -> Dict:
@@ -324,12 +326,14 @@ def _normalize(data: Dict, image_path: str) -> Dict:
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
     unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
 
-    # Known building street numbers — reject if Gemini returned one of these
+    # Reject building/street numbers and numbers too small to be apartment units
     _STREET_NUMBERS = {"10", "1285"}
     if unit_candidate in _STREET_NUMBERS:
         unit_candidate = "UNKNOWN"
+    elif unit_candidate.isdigit() and int(unit_candidate) < 100:
+        unit_candidate = "UNKNOWN"
 
-    # Reject pure 5-digit numbers (postal codes / zip codes, not suite numbers)
+    # Reject pure 5-digit numbers (postal codes / zip codes)
     if re.fullmatch(r"\d{5}", unit_candidate):
         unit_candidate = "UNKNOWN"
 
@@ -353,23 +357,22 @@ def _normalize(data: Dict, image_path: str) -> Dict:
 # --- RETRY WITH FOCUSED PROMPT ----------------------------------------
 # ----------------------------------------------------------------------
 
-_FOCUSED_PROMPT = """Look very carefully at this shipping label image.
+_FOCUSED_PROMPT = """Look carefully at this shipping label. Focus only on the RECIPIENT (ship-to) block, not the sender/return address.
 
-I need ONLY these two fields from the DELIVERY/RECIPIENT address block (ignore the return/sender address):
+BUILDING CONTEXT:
+  • 10 Graphophone Grove, Toronto  — building number = 10,   apartment units are 3–4 digits
+  • 1285 Dupont St, Toronto        — building number = 1285,  apartment units are 3–4 digits
 
-1. The apartment/suite/unit number:
-   - It is a SHORT number, typically 2-4 digits (e.g. 204, 1011, 1911, 204A).
-   - The street/civic number at the START of an address line (e.g. "19" in "19 Graphophone Grove") is NOT the unit.
-   - Look for it AFTER keywords APT, UNIT, SUITE, # — or as a number appearing after the street name.
-   - Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
-   - If genuinely not found, return "UNKNOWN".
+Address lines on these labels often read:  <UNIT> <BUILDING#> <STREET>
+  2406 10 GRAPHOPHONE GROVE  →  unit = 2406  (10 is the building, not the unit)
+  1507 1285 DUPONT ST        →  unit = 1507  (1285 is the building, not the unit)
 
-2. The recipient's full personal name (First Last) — NOT a company name.
-   - Check for "ATTN:", "C/O:", or "Attention:" prefixes — the name follows immediately.
-   - If only a company name exists (no individual), return "UNKNOWN".
+Return ONLY:
+{"unit": "<3-4 digit apartment number, or UNKNOWN>", "name": "<First Last personal name, or UNKNOWN>"}
 
-Return ONLY JSON:
-{"unit": "<unit number or UNKNOWN>", "name": "<full name or UNKNOWN>"}"""
+Rules:
+- Unit must be 100–9999. Never 10, never 1285, never a postal code or tracking number.
+- Name must be a personal name. Check after SHIP TO:, ATTN:, C/O:."""
 
 
 def _retry_focused(image_path: str, current: Dict) -> Dict:
