@@ -260,11 +260,6 @@ def extract_with_gemini(image_path: str) -> Dict:
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/png" if ext == ".png" else "image/jpeg"
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={api_key}"
-    )
-
     payload = {
         "contents": [{
             "parts": [
@@ -280,8 +275,20 @@ def extract_with_gemini(image_path: str) -> Dict:
         },
     }
 
-    print("Sending image to Gemini Vision API...")
-    response = requests.post(url, json=payload, timeout=45)
+    # Try 2.5-flash first (higher quality); fall back to 1.5-flash on quota error
+    _MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    response = None
+    for model in _MODELS:
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent?key={api_key}"
+        )
+        print(f"Sending image to Gemini Vision API ({model})...")
+        response = requests.post(url, json=payload, timeout=45)
+        if response.status_code == 429:
+            print(f"[WARN] {model} quota exceeded — trying next model...")
+            continue
+        break
 
     if response.status_code != 200:
         raise Exception(f"Gemini API error {response.status_code}: {response.text}")
@@ -400,11 +407,6 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/png" if ext == ".png" else "image/jpeg"
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={api_key}"
-    )
-
     payload = {
         "contents": [{
             "parts": [
@@ -416,7 +418,17 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
     }
 
     try:
-        resp = requests.post(url, json=payload, timeout=30)
+        resp = None
+        for model in ("gemini-2.5-flash", "gemini-1.5-flash"):
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={api_key}"
+            )
+            resp = requests.post(url, json=payload, timeout=30)
+            if resp.status_code == 429:
+                print(f"[WARN] Retry: {model} quota exceeded — trying next model...")
+                continue
+            break
         if resp.status_code != 200:
             return current
         result = resp.json()
