@@ -50,9 +50,12 @@ def append_row(row_data, building: str = "g2"):
             f"Expected: [timestamp, unit, name, supplier, parcel_type, released?, released_time]"
         )
 
-    result = sheet.append_row(row_data, value_input_option="RAW")
-    row_count = len(sheet.col_values(1))
-    print(f"[{building.upper()}] Added new parcel entry — sheet now has {row_count} rows, API: {result}")
+    # col_values(1) returns only cells with actual values — ignores pre-formatted
+    # checkbox rows that values.append would otherwise treat as "data"
+    col_a = sheet.col_values(1)
+    next_row = max(len(col_a) + 1, 2)  # at least row 2 (after header)
+    sheet.update(f"A{next_row}:G{next_row}", [row_data], value_input_option="RAW")
+    print(f"[{building.upper()}] Added new parcel entry at row {next_row}")
     return row_data
 
 
