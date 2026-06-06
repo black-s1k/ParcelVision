@@ -1,10 +1,7 @@
-"""
-app2.py - ParcelVision with Remote 1Valet Control
-(HTTP Version for NGROK — multi-building G1/G2)
-"""
+"""\napp2.py - ParcelVision with Remote 1Valet Control\n(HTTP Version for NGROK — multi-building G1/G2)\n"""
 
 from flask import Flask, request, jsonify, render_template
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, join_room
 
 import os
 import sys
@@ -39,7 +36,6 @@ TEMPLATE_DIR = (
 )
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
-socketio = SocketIO(app, cors_allowed_origins="https://my.1valetbas.com", async_mode="threading")
 
 # Accept WebSocket connections from both 1Valet portals
 CORS_ORIGINS = [
@@ -49,8 +45,9 @@ CORS_ORIGINS = [
 _ws_origins = [o for o in CORS_ORIGINS if o]
 socketio = SocketIO(app, cors_allowed_origins=_ws_origins, async_mode="threading")
 
-# ── Per-building queues ────────────────────────────────────
+# ── Per-building queues ───────────────────────────────────────
 pending_units_queue: dict = {"g1": [], "g2": []}
+release_queue:       dict = {"g1": [], "g2": []}
 
 # Job results store for async upload processing
 job_results: dict = {}
@@ -59,7 +56,7 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# ── CORS (HTTP endpoints — handle both 1Valet origins) ──────────────────
+# ── CORS (HTTP endpoints — handle both 1Valet origins) ──────────────
 def _allowed_origin(origin: str) -> bool:
     return origin in CORS_ORIGINS
 
@@ -78,13 +75,48 @@ def valet_preflight(subpath):
     return "", 204
 
 
-# ── SocketIO: building-specific rooms ─────────────────────────────
+# ── SocketIO: building-specific rooms ───────────────────────────
 @socketio.on("join_building")
 def on_join_building(data):
     building = data.get("building", "g2")
     if building in ("g1", "g2"):
         join_room(building)
         print(f"[SocketIO] Client joined room: {building}")
+
+
+# ── Background sheet pollers (one per building) ────────────────────
+def _poll_sheet_releases(building: str):
+    import time
+    print(f"[ReleasePoller-{building}] Started — checking sheet every 5s")
+    while True:
+        try:
+            ws = connect_to_sheet(building)
+            all_rows = ws.get_all_values()
+            for i, row in enumerate(all_rows):
+                if i == 0:
+                    continue
+                if len(row) < 6:
+                    continue
+                released = str(row[5]).strip().upper()
+                notified = str(row[6]).strip() if len(row) > 6 else ""
+                if released in ("TRUE", "1", "YES") and not notified:
+                    unit = str(row[1]).strip().upper()
+                    if unit and unit not in ("", "UNKNOWN"):
+                        ts = datetime.now().strftime("%m/%d/%Y %H:%M:%S")
+                        ws.update_cell(i + 1, 7, ts)
+                        socketio.emit(
+                            "release_unit",
+                            {"unit": unit, "timestamp": ts, "building": building},
+                            room=building,
+                        )
+                        print(f"[ReleasePoller-{building}] Pushed release_unit for unit {unit}")
+        except Exception as e:
+            print(f"[ReleasePoller-{building}] Error: {e}")
+        time.sleep(5)
+
+
+for _bld in ("g1", "g2"):
+    threading.Thread(target=_poll_sheet_releases, args=(_bld,), daemon=True).start()
 
 
 # ============================================================
@@ -141,7 +173,7 @@ def upload_parcel():
                 timestamp_safe     = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
                 append_row(
-                    [timestamp_readable, unit, name, supplier, parcel_type, "FALSE", ""],
+                    [timestamp_readable, unit, name, supplier, parcel_type],
                     building=building,
                 )
                 print(f"[{job_id}] Sheets written ({building})")
@@ -181,7 +213,7 @@ def upload_parcel():
                 print(f"[{job_id}] Done")
 
             except Exception as e:
-                traceback.print_exc()  
+                traceback.print_exc()
                 if os.path.exists(temp_path):
                     try:
                         os.remove(temp_path)
@@ -259,6 +291,19 @@ def clear_queue():
     count = len(pending_units_queue[building])
     pending_units_queue[building] = []
     return jsonify({"status": "success", "message": f"Cleared {count} units from {building} queue"})
+
+
+@app.route("/valet/release-pending", methods=["GET"])
+def get_release_pending():
+    building = request.args.get("building", "g2").lower()
+    if building not in ("g1", "g2"):
+        building = "g2"
+    q = release_queue[building]
+    if not q:
+        return jsonify({"status": "empty", "units": []})
+    units = q.copy()
+    release_queue[building] = []
+    return jsonify({"status": "pending", "count": len(units), "units": units})
 
 
 if __name__ == "__main__":

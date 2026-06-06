@@ -36,7 +36,7 @@ def append_row(row_data, building: str = "g2"):
     Append a parcel entry to the Google Sheet.
 
     Args:
-        row_data (list): [timestamp, unit, name, supplier, parcel_type, released?, released_time]
+        row_data (list): [timestamp, unit, name, supplier, parcel_type]
         building (str): 'g1' or 'g2'
     """
     sheet = connect_to_sheet(building)
@@ -44,17 +44,19 @@ def append_row(row_data, building: str = "g2"):
     if not isinstance(row_data, list):
         raise ValueError(f"Expected list, got {type(row_data)}")
 
-    if len(row_data) != 7:
+    if len(row_data) != 5:
         raise ValueError(
-            f"Expected 7 elements in row_data, got {len(row_data)}. "
-            f"Expected: [timestamp, unit, name, supplier, parcel_type, released?, released_time]"
+            f"Expected 5 elements in row_data, got {len(row_data)}. "
+            f"Expected: [timestamp, unit, name, supplier, parcel_type]"
         )
 
     # col_values(1) returns only cells with actual values — ignores pre-formatted
     # checkbox rows that values.append would otherwise treat as "data"
     col_a = sheet.col_values(1)
     next_row = max(len(col_a) + 1, 2)  # at least row 2 (after header)
-    sheet.update(f"A{next_row}:G{next_row}", [row_data], value_input_option="RAW")
+    # Write only columns A-E — leave the Released checkbox (F) and Released Time (G)
+    # untouched so they remain as normal unchecked checkboxes
+    sheet.update(f"A{next_row}:E{next_row}", [row_data], value_input_option="RAW")
     print(f"[{building.upper()}] Added new parcel entry at row {next_row}")
     return row_data
 
