@@ -54,9 +54,10 @@ def append_row(row_data, building: str = "g2"):
     # checkbox rows that values.append would otherwise treat as "data"
     col_a = sheet.col_values(1)
     next_row = max(len(col_a) + 1, 2)  # at least row 2 (after header)
-    # Write only columns A-E — leave the Released checkbox (F) and Released Time (G)
-    # untouched so they remain as normal unchecked checkboxes
-    sheet.update(f"A{next_row}:E{next_row}", [row_data], value_input_option="RAW")
+    # Write A-E (data) + F (boolean False = unchecked checkbox).
+    # Empty cells don't match a FALSE filter; boolean false does while still looking
+    # like a normal unchecked checkbox when the column has checkbox data-validation.
+    sheet.update(f"A{next_row}:F{next_row}", [row_data + [False]], value_input_option="RAW")
     print(f"[{building.upper()}] Added new parcel entry at row {next_row}")
     return row_data
 

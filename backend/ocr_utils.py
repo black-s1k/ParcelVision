@@ -20,23 +20,31 @@ import pytesseract
 # ----------------------------------------------------------------------
 
 def preprocess_image(image_path: str) -> str:
+    """
+    Enhance image quality for OCR: denoise, sharpen, boost contrast.
+    Returns path to a temp preprocessed file (caller should delete when done).
+    """
     img = cv2.imread(image_path)
     if img is None:
         return image_path
 
+    # Upscale small images so text is large enough for OCR
     h, w = img.shape[:2]
     if max(h, w) < 1200:
         scale = 1200 / max(h, w)
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
 
+    # Denoise
     img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
 
+    # Convert to LAB and apply CLAHE on L-channel for better contrast
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     l = clahe.apply(l)
     img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
+    # Mild sharpening kernel
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
     img = cv2.filter2D(img, -1, kernel)
 
@@ -50,6 +58,9 @@ def preprocess_image(image_path: str) -> str:
 # ----------------------------------------------------------------------
 
 def guess_parcel_type(image_path: str) -> str:
+    """
+    Simple color + texture classifier for parcel type.
+    """
     img = cv2.imread(image_path)
     if img is None:
         return "BROWN BOX"
@@ -78,11 +89,20 @@ def guess_parcel_type(image_path: str) -> str:
 
 
 def _extract_unit_from_text(text: str) -> str:
+    """
+    Try multiple patterns to extract a unit number from OCR text.
+    Preserves alphanumeric suffixes (e.g., 204A, 1911B).
+    """
     patterns = [
+        # Explicit keyword + optional separator + unit (with optional letter suffix)
         r"(?:UNIT|APT|SUITE|APARTMENT|ROOM|RM|#)\s*[:#\-]?\s*(\d{1,5}[A-Z]?)\b",
+        # Unit embedded at the start of an address line: "1911B - 123 Main St"
         r"^(\d{2,5}[A-Z]?)\s*[-,]",
+        # Unit after a dash in address: "123 Main St - 204A"
         r"-\s*(\d{2,5}[A-Z]?)\s*$",
+        # Bare unit on its own line (2-4 digits optionally followed by a letter)
         r"^\s*(\d{2,4}[A-Z]?)\s*$",
+        # Fallback: first 2-5 digit sequence (with optional letter) that looks like a unit
         r"\b(\d{2,5}[A-Z]?)\b",
     ]
     for pat in patterns:
@@ -94,6 +114,11 @@ def _extract_unit_from_text(text: str) -> str:
 
 
 def _extract_name_from_text(text: str) -> str:
+    """
+    Extract recipient name from OCR text.
+    Looks for 'TO:' blocks first, then falls back to capitalized word pairs.
+    """
+    # Look for "TO:" label followed by a name on the same or next line
     to_block = re.search(
         r"(?:^|\n)\s*TO\s*:?\s*([A-Z][A-Za-z'\-]{1,}(?:\s+[A-Z][A-Za-z'\-]{1,})+)",
         text, re.MULTILINE
@@ -101,11 +126,13 @@ def _extract_name_from_text(text: str) -> str:
     if to_block:
         return to_block.group(1).strip().title()
 
+    # Capitalized full name (2+ words, allows short names like "Li Wang")
     name_match = re.search(
         r"\b([A-Z][A-Z'\-]{0,}(?:\s+[A-Z][A-Z'\-]{0,})+)\b", text
     )
     if name_match:
         candidate = name_match.group(1).strip()
+        # Avoid matching supplier names / common label keywords
         skip_words = {
             "AMAZON", "FEDEX", "UPS", "DHL", "PUROLATOR", "CANADA POST",
             "CANPAR", "INTELCOM", "UNIT", "SUITE", "APT", "STREET", "AVENUE",
@@ -119,6 +146,10 @@ def _extract_name_from_text(text: str) -> str:
 
 
 def fallback_regex_ocr(image_path: str) -> Dict:
+    """
+    Backup OCR extraction using pytesseract + regex if Gemini fails.
+    Gracefully handles missing tesseract (returns UNKNOWN for text fields).
+    """
     preprocessed = preprocess_image(image_path)
     text = ""
     try:
@@ -159,54 +190,57 @@ def fallback_regex_ocr(image_path: str) -> Dict:
 # --- GEMINI EXTRACTION ------------------------------------------------
 # ----------------------------------------------------------------------
 
-_GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Your job is to extract key fields from the RECIPIENT (delivery-to) address — NOT the sender/return address.
+_GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Extract fields from the RECIPIENT (ship-to) address only — NOT the sender/return/from address.
 
-Extract and return ONLY a JSON object with exactly these fields:
-
+Return ONLY a JSON object with exactly these four fields:
 {
-  "unit": "<apartment, suite, or unit number — 2-4 digits with optional letter, e.g. 204, 1911, 204A, 1911B>",
-  "name": "<recipient's full personal name, e.g. John Smith — NOT a company name>",
-  "supplier": "<courier name>",
-  "parcel_type": "<color + type, e.g. BROWN BOX, WHITE PACKAGE, GREY PACKAGE>"
+  "unit": "<apartment or suite number>",
+  "name": "<recipient full personal name>",
+  "supplier": "<courier>",
+  "parcel_type": "<color + BOX or PACKAGE>"
 }
 
-Rules for "unit":
-- The unit/suite number is a SHORT number (typically 2-4 digits, e.g. 204, 1011, 1911).
-- The civic/street number (e.g. the "10" in "10 Graphophone Grove" or "1285" in "1285 Dupont St") is NOT the unit. Do NOT return the street number as the unit.
-- Canadian condo addresses often use the format "UNIT# - STREET# Street Name". Example: "2401 - 10 Graphophone Grove" means unit=2401, street=10. The unit is the LARGER number BEFORE the dash.
-- If the address line contains both a street number and a unit (e.g. "1285 Dupont St, Suite 204"), return only the suite/unit portion (204).
-- Look for keywords: APT, UNIT, SUITE, # — or a number appearing AFTER the street name.
-- Canadian postal codes (e.g. M5V 3A8, M6H 0E5) are NOT unit numbers.
-- Include any trailing letter suffix (204A stays 204A).
-- If no unit found, use "UNKNOWN".
+BUILDING CONTEXT — these labels are for two residential buildings in Toronto:
+  • 10 Graphophone Grove  (building number = 10,   apartment units are 3–4 digits, e.g. 1204, 2406)
+  • 1285 Dupont St        (building number = 1285,  apartment units are 3–4 digits, e.g. 504, 1106)
 
-Rules for "name":
-- Must be a personal name (First Last). NOT a company, building, or courier name.
-- Look for prefixes like "ATTN:", "C/O:", "Attention:", or "Care of:" — the name immediately follows.
-- If the label shows both a company and a person's name, return the person's name.
-- If only a company name is present (no individual), use "UNKNOWN".
+ADDRESS FORMAT on these labels often reads:  <UNIT>  <BUILDING#>  <STREET NAME>
+  2406 10 GRAPHOPHONE GROVE   →  unit = 2406   (10 is the building, not the unit)
+  1507 1285 DUPONT ST         →  unit = 1507   (1285 is the building, not the unit)
+  SUITE 804, 10 GRAPHOPHONE   →  unit = 804
 
-Rules for "supplier":
-- Match courier branding, logo, or label text.
-- Known couriers: AMAZON, UPS, FEDEX, UNI, DRAGONFLY, EMILE, FLEETOPTICS, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST.
-- If the courier is clearly readable but not in the list above, return it exactly as it appears (e.g. UNIQLO, ECOMLOGISTICS, FOXNDGROUND).
-- If unidentifiable, use "OTHER".
+UNIT rules:
+- Must be 3–4 digits (100–9999), with an optional trailing letter (e.g. 204A).
+- The numbers 10 and 1285 are always the building/street number — NEVER the unit.
+- Any number under 100 is NOT an apartment unit.
+- Canadian postal codes (e.g. M6H 0E5), tracking numbers, and barcodes are NOT units.
+- If genuinely absent, return "UNKNOWN".
 
-Rules for "parcel_type":
-- Identify the COLOR and FORM of the physical packaging.
-- FORM: Use "PACKAGE" for soft bags, poly mailers, padded envelopes, or plastic pouches. Use "BOX" for rigid cardboard boxes.
-- COLOR options: BROWN, WHITE, BLACK, BLUE, PINK, GREY, CLEAR
-- Use "CLEAR PACKAGE" for transparent or see-through plastic poly bags.
-- Amazon-specific exceptions (only when Amazon/Prime branding is visible):
-  - Amazon blue poly mailer or bag -> "PRIME BLUE PACKAGE"
-  - Amazon orange packaging -> "PRIME ORANGE PACKAGE"
-  - Amazon brown cardboard box with Prime/Amazon logo -> "AMAZON BOX"
-- Standard examples: "BROWN BOX", "WHITE PACKAGE", "BLACK PACKAGE", "BLUE BOX", "PINK PACKAGE", "GREY PACKAGE", "BLACK BOX"
-- NEVER use words like "bag", "polybag", "mailer", "envelope" — always use PACKAGE or BOX.
-- Return ONLY the JSON object. No markdown, no explanation."""
+NAME rules:
+- Personal name only (First Last). Never a company, building name, or courier.
+- Check the line immediately after "SHIP TO:", "TO:", "ATTN:", or "C/O:".
+- If the label has both a company and a person, return the person.
+- If only a company name exists, return "UNKNOWN".
+
+SUPPLIER — pick one:
+  AMAZON, UPS, FEDEX, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER
+
+PARCEL TYPE:
+- FORM: PACKAGE (soft bag, poly mailer, padded envelope) or BOX (rigid cardboard)
+- COLOR: BROWN, WHITE, BLACK, BLUE, PINK, GREY, CLEAR
+- Amazon exceptions (only with visible Amazon/Prime branding):
+    blue poly mailer  → PRIME BLUE PACKAGE
+    orange wrap       → PRIME ORANGE PACKAGE
+    brown box         → AMAZON BOX
+- Never use "bag", "mailer", or "envelope".
+
+Return ONLY the JSON. No markdown. No explanation."""
 
 
 def extract_with_gemini(image_path: str) -> Dict:
+    """
+    Primary extraction via Gemini Vision API with image preprocessing.
+    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY not set")
@@ -222,13 +256,9 @@ def extract_with_gemini(image_path: str) -> Dict:
             except OSError:
                 pass
 
+    # Detect mime type from extension
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/png" if ext == ".png" else "image/jpeg"
-
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={api_key}"
-    )
 
     payload = {
         "contents": [{
@@ -245,8 +275,20 @@ def extract_with_gemini(image_path: str) -> Dict:
         },
     }
 
-    print("Sending image to Gemini Vision API...")
-    response = requests.post(url, json=payload, timeout=45)
+    # Try 2.5-flash first (higher quality); fall back to 1.5-flash on quota error
+    _MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    response = None
+    for model in _MODELS:
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent?key={api_key}"
+        )
+        print(f"Sending image to Gemini Vision API ({model})...")
+        response = requests.post(url, json=payload, timeout=45)
+        if response.status_code == 429:
+            print(f"[WARN] {model} quota exceeded — trying next model...")
+            continue
+        break
 
     if response.status_code != 200:
         raise Exception(f"Gemini API error {response.status_code}: {response.text}")
@@ -256,8 +298,11 @@ def extract_with_gemini(image_path: str) -> Dict:
         raise Exception("No candidates in Gemini response")
 
     raw = result["candidates"][0]["content"]["parts"][0].get("text", "").strip()
+
+    # Strip markdown code fences if present
     raw = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
 
+    # Try standard JSON parse first (greedy match to handle multi-line)
     json_match = re.search(r"\{.*\}", raw, re.DOTALL)
     if json_match:
         try:
@@ -266,10 +311,11 @@ def extract_with_gemini(image_path: str) -> Dict:
         except json.JSONDecodeError:
             pass
 
+    # Gemini output was truncated — salvage field values with targeted regex
     print(f"[WARN] JSON parse failed — salvaging fields from partial output:\n{raw}")
     data = {}
     for field in ("unit", "name", "supplier", "parcel_type"):
-        m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
+        m = re.search(rf'"{{field}}"\s*:\s*"([^"]*)"', raw)
         if m:
             data[field] = m.group(1)
     if not data:
@@ -278,15 +324,23 @@ def extract_with_gemini(image_path: str) -> Dict:
 
 
 def _normalize(data: Dict, image_path: str) -> Dict:
+    """
+    Normalize and validate extracted fields.
+    Preserves alphanumeric unit suffixes (e.g., 204A).
+    """
     # --- Unit ---
     unit_raw = str(data.get("unit", "")).strip().upper()
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
     unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
 
+    # Reject building/street numbers and numbers too small to be apartment units
     _STREET_NUMBERS = {"10", "1285"}
     if unit_candidate in _STREET_NUMBERS:
         unit_candidate = "UNKNOWN"
+    elif unit_candidate.isdigit() and int(unit_candidate) < 100:
+        unit_candidate = "UNKNOWN"
 
+    # Reject pure 5-digit numbers (postal codes / zip codes)
     if re.fullmatch(r"\d{5}", unit_candidate):
         unit_candidate = "UNKNOWN"
 
@@ -310,27 +364,28 @@ def _normalize(data: Dict, image_path: str) -> Dict:
 # --- RETRY WITH FOCUSED PROMPT ----------------------------------------
 # ----------------------------------------------------------------------
 
-_FOCUSED_PROMPT = """Look very carefully at this shipping label image.
+_FOCUSED_PROMPT = """Look carefully at this shipping label. Focus only on the RECIPIENT (ship-to) block, not the sender/return address.
 
-I need ONLY these two fields from the DELIVERY/RECIPIENT address block (ignore the return/sender address):
+BUILDING CONTEXT:
+  • 10 Graphophone Grove, Toronto  — building number = 10,   apartment units are 3–4 digits
+  • 1285 Dupont St, Toronto        — building number = 1285,  apartment units are 3–4 digits
 
-1. The apartment/suite/unit number:
-   - It is a SHORT number, typically 2-4 digits (e.g. 204, 1011, 1911, 204A).
-   - The street/civic number at the START of an address line (e.g. "10" in "10 Graphophone Grove") is NOT the unit.
-   - Canadian condo format: "UNIT# - STREET# Street Name" — the unit is the LARGER number BEFORE the dash.
-   - Look for it AFTER keywords APT, UNIT, SUITE, # — or as a number appearing after the street name.
-   - Canadian postal codes (e.g. M5V 3A8) are NOT unit numbers.
-   - If genuinely not found, return "UNKNOWN".
+Address lines on these labels often read:  <UNIT> <BUILDING#> <STREET>
+  2406 10 GRAPHOPHONE GROVE  →  unit = 2406  (10 is the building, not the unit)
+  1507 1285 DUPONT ST        →  unit = 1507  (1285 is the building, not the unit)
 
-2. The recipient's full personal name (First Last) — NOT a company name.
-   - Check for "ATTN:", "C/O:", or "Attention:" prefixes — the name follows immediately.
-   - If only a company name exists (no individual), return "UNKNOWN".
+Return ONLY:
+{"unit": "<3-4 digit apartment number, or UNKNOWN>", "name": "<First Last personal name, or UNKNOWN>"}
 
-Return ONLY JSON:
-{"unit": "<unit number or UNKNOWN>", "name": "<full name or UNKNOWN>"}"""
+Rules:
+- Unit must be 100–9999. Never 10, never 1285, never a postal code or tracking number.
+- Name must be a personal name. Check after SHIP TO:, ATTN:, C/O:."""
 
 
 def _retry_focused(image_path: str, current: Dict) -> Dict:
+    """
+    If unit or name is still UNKNOWN after first pass, do a second focused call.
+    """
     if current.get("unit") != "UNKNOWN" and current.get("name") != "UNKNOWN":
         return current
 
@@ -352,11 +407,6 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/png" if ext == ".png" else "image/jpeg"
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={api_key}"
-    )
-
     payload = {
         "contents": [{
             "parts": [
@@ -368,7 +418,17 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
     }
 
     try:
-        resp = requests.post(url, json=payload, timeout=30)
+        resp = None
+        for model in ("gemini-2.5-flash", "gemini-1.5-flash"):
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={api_key}"
+            )
+            resp = requests.post(url, json=payload, timeout=30)
+            if resp.status_code == 429:
+                print(f"[WARN] Retry: {model} quota exceeded — trying next model...")
+                continue
+            break
         if resp.status_code != 200:
             return current
         result = resp.json()
@@ -404,6 +464,9 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
 # ----------------------------------------------------------------------
 
 def extract_data(image_path: str) -> Dict:
+    """
+    Unified interface: Gemini first → focused retry → fallback OCR.
+    """
     print(f"\n{'='*60}")
     print(f"ANALYZING: {os.path.basename(image_path)}")
     print(f"{'='*60}\n")
@@ -414,8 +477,10 @@ def extract_data(image_path: str) -> Dict:
         print(f"[WARN] Gemini failed: {e}\nUsing fallback OCR...")
         result = fallback_regex_ocr(image_path)
 
+    # Second pass: focused retry for any remaining UNKNOWN fields
     result = _retry_focused(image_path, result)
 
+    # Final fallback fill for any still-missing fields
     for key in ["unit", "name", "supplier", "parcel_type"]:
         if not result.get(key) or result[key] == "UNKNOWN":
             print(f"[WARN] {key} still unknown — filling via OCR fallback...")
