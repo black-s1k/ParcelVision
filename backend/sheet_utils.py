@@ -31,6 +31,43 @@ def connect_to_sheet(building: str = "g2"):
     return client.open_by_key(SHEET_ID).worksheet(WORKSHEET_NAME)
 
 
+def _write_checkbox(sheet, row: int, col: int, checked: bool = False):
+    """
+    Force cell (1-based row/col) to render as a real interactive checkbox holding
+    the given boolean value, regardless of whether it was pre-formatted.
+
+    A plain value write to a cell with no checkbox data-validation shows the
+    literal text TRUE/FALSE instead of a checkbox — and an empty cell doesn't
+    match a FALSE filter. Re-applying the BOOLEAN validation + value together
+    guarantees the cell always looks and behaves exactly like the manually
+    inserted checkboxes (unchecked, matches FALSE filter).
+    """
+    sheet.spreadsheet.batch_update({
+        "requests": [{
+            "updateCells": {
+                "range": {
+                    "sheetId": sheet.id,
+                    "startRowIndex": row - 1,
+                    "endRowIndex": row,
+                    "startColumnIndex": col - 1,
+                    "endColumnIndex": col,
+                },
+                "rows": [{
+                    "values": [{
+                        "userEnteredValue": {"boolValue": checked},
+                        "dataValidation": {
+                            "condition": {"type": "BOOLEAN"},
+                            "strict": True,
+                            "showCustomUi": True,
+                        },
+                    }]
+                }],
+                "fields": "userEnteredValue,dataValidation",
+            }
+        }]
+    })
+
+
 def append_row(row_data, building: str = "g2"):
     """
     Append a parcel entry to the Google Sheet.
@@ -54,10 +91,9 @@ def append_row(row_data, building: str = "g2"):
     # checkbox rows that values.append would otherwise treat as "data"
     col_a = sheet.col_values(1)
     next_row = max(len(col_a) + 1, 2)  # at least row 2 (after header)
-    # Write A-E (data) + F (boolean False = unchecked checkbox).
-    # Empty cells don't match a FALSE filter; boolean false does while still looking
-    # like a normal unchecked checkbox when the column has checkbox data-validation.
-    sheet.update(f"A{next_row}:F{next_row}", [row_data + [False]], value_input_option="RAW")
+    sheet.update(f"A{next_row}:E{next_row}", [row_data], value_input_option="RAW")
+    # Released checkbox (F) — always re-create as a real unchecked checkbox
+    _write_checkbox(sheet, next_row, 6, checked=False)
     print(f"[{building.upper()}] Added new parcel entry at row {next_row}")
     return row_data
 
