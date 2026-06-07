@@ -237,12 +237,50 @@ PARCEL TYPE:
 Return ONLY the JSON. No markdown. No explanation."""
 
 
+# Try the higher-quality model first; fall back to a cheaper one on quota errors
+_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"]
+
+
+def _gemini_keys():
+    """
+    GEMINI_API_KEY may hold a single key or a comma-separated list — supporting
+    multiple keys lets us rotate to a backup the moment one hits its per-minute
+    or per-day rate limit (free-tier quotas are easy to hit even at low volume).
+    """
+    raw = os.getenv("GEMINI_API_KEY", "")
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def _post_to_gemini(payload: dict, timeout: int):
+    """
+    POST to the Gemini API, rotating through every (api_key, model) combination
+    until one returns a non-429 response. Returns the last response received.
+    """
+    keys = _gemini_keys()
+    if not keys:
+        raise ValueError("GEMINI_API_KEY not set")
+
+    response = None
+    for api_key in keys:
+        for model in _MODELS:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={api_key}"
+            )
+            print(f"Sending image to Gemini Vision API ({model}, key ...{api_key[-4:]})...")
+            response = requests.post(url, json=payload, timeout=timeout)
+            if response.status_code == 429:
+                print(f"[WARN] {model} quota exceeded for key ...{api_key[-4:]} — trying next...")
+                continue
+            return response
+    return response
+
+
 def extract_with_gemini(image_path: str) -> Dict:
     """
     Primary extraction via Gemini Vision API with image preprocessing.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not _gemini_keys():
         raise ValueError("GEMINI_API_KEY not set")
 
     preprocessed = preprocess_image(image_path)
@@ -275,23 +313,11 @@ def extract_with_gemini(image_path: str) -> Dict:
         },
     }
 
-    # Try 2.5-flash first (higher quality); fall back to 1.5-flash on quota error
-    _MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"]
-    response = None
-    for model in _MODELS:
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{model}:generateContent?key={api_key}"
-        )
-        print(f"Sending image to Gemini Vision API ({model})...")
-        response = requests.post(url, json=payload, timeout=45)
-        if response.status_code == 429:
-            print(f"[WARN] {model} quota exceeded — trying next model...")
-            continue
-        break
-
-    if response.status_code != 200:
-        raise Exception(f"Gemini API error {response.status_code}: {response.text}")
+    response = _post_to_gemini(payload, timeout=45)
+    if response is None or response.status_code != 200:
+        code = response.status_code if response is not None else "N/A"
+        body = response.text if response is not None else "no response"
+        raise Exception(f"Gemini API error {code}: {body}")
 
     result = response.json()
     if not result.get("candidates"):
@@ -389,8 +415,7 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
     if current.get("unit") != "UNKNOWN" and current.get("name") != "UNKNOWN":
         return current
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not _gemini_keys():
         return current
 
     preprocessed = preprocess_image(image_path)
@@ -418,18 +443,8 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
     }
 
     try:
-        resp = None
-        for model in ("gemini-2.5-flash", "gemini-1.5-flash"):
-            url = (
-                "https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{model}:generateContent?key={api_key}"
-            )
-            resp = requests.post(url, json=payload, timeout=30)
-            if resp.status_code == 429:
-                print(f"[WARN] Retry: {model} quota exceeded — trying next model...")
-                continue
-            break
-        if resp.status_code != 200:
+        resp = _post_to_gemini(payload, timeout=30)
+        if resp is None or resp.status_code != 200:
             return current
         result = resp.json()
         if not result.get("candidates"):
