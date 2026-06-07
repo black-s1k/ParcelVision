@@ -1,4 +1,7 @@
-"""\napp2.py - ParcelVision with Remote 1Valet Control\n(HTTP Version for NGROK — multi-building G1/G2)\n"""
+"""
+app2.py - ParcelVision with Remote 1Valet Control
+(HTTP Version for NGROK — multi-building G1/G2)
+"""
 
 from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO, join_room
@@ -45,7 +48,7 @@ CORS_ORIGINS = [
 _ws_origins = [o for o in CORS_ORIGINS if o]
 socketio = SocketIO(app, cors_allowed_origins=_ws_origins, async_mode="threading")
 
-# ── Per-building queues ───────────────────────────────────────
+# ── Per-building queues ───────────────────────────────────────────────
 pending_units_queue: dict = {"g1": [], "g2": []}
 release_queue:       dict = {"g1": [], "g2": []}
 
@@ -56,7 +59,7 @@ UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# ── CORS (HTTP endpoints — handle both 1Valet origins) ──────────────
+# ── CORS (HTTP endpoints — handle both 1Valet origins) ─────────────────
 def _allowed_origin(origin: str) -> bool:
     return origin in CORS_ORIGINS
 
@@ -75,7 +78,7 @@ def valet_preflight(subpath):
     return "", 204
 
 
-# ── SocketIO: building-specific rooms ───────────────────────────
+# ── SocketIO: building-specific rooms ──────────────────────────
 @socketio.on("join_building")
 def on_join_building(data):
     building = data.get("building", "g2")
@@ -84,7 +87,7 @@ def on_join_building(data):
         print(f"[SocketIO] Client joined room: {building}")
 
 
-# ── Background sheet pollers (one per building) ────────────────────
+# ── Background sheet pollers (one per building) ───────────────────────
 def _poll_sheet_releases(building: str):
     import time
     print(f"[ReleasePoller-{building}] Started — checking sheet every 5s")
@@ -158,7 +161,7 @@ def upload_parcel():
         def process(job_id, temp_path, building):
             try:
                 print(f"\n[{job_id}] OCR start (building={building})")
-                result = analyze_parcel(temp_path)
+                result = analyze_parcel(temp_path, building)
                 if isinstance(result, list):
                     result = result[0] if result else {}
 
