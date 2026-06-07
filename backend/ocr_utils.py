@@ -16,6 +16,45 @@ import pytesseract
 
 
 # ----------------------------------------------------------------------
+# --- BUILDING CONTEXT --------------------------------------------------
+# ----------------------------------------------------------------------
+# The concierge already tells us which building a parcel was scanned at —
+# feeding that civic address to Gemini turns "which of these two numbers is
+# the unit?" from a guess into a near-deterministic lookup, and lets us
+# reject the civic number outright if the model still returns it.
+
+_BUILDING_INFO = {
+    "g1": {
+        "name": "1285 Dupont St, Toronto",
+        "civic": "1285",
+        "unit_examples": [
+            ("1106-1285 DUPONT ST", "1106"),
+            ("1285 DUPONT ST, UNIT 504", "504"),
+            ("SUITE 207 - 1285 DUPONT ST", "207"),
+        ],
+    },
+    "g2": {
+        "name": "10 Graphophone Grove, Toronto",
+        "civic": "10",
+        "unit_examples": [
+            ("504-10 GRAPHOPHONE GROVE", "504"),
+            ("2406 10 GRAPHOPHONE GROVE", "2406"),
+            ("SUITE 804, 10 GRAPHOPHONE GROVE", "804"),
+        ],
+    },
+}
+
+# Civic numbers for both buildings are never valid units — reject either,
+# regardless of which building the parcel was scanned at (mis-sorted parcels
+# can carry the other building's label).
+_CIVIC_NUMBERS = {info["civic"] for info in _BUILDING_INFO.values()}
+
+
+def _building_info(building: str) -> dict:
+    return _BUILDING_INFO.get(building, _BUILDING_INFO["g2"])
+
+
+# ----------------------------------------------------------------------
 # --- IMAGE PREPROCESSING ----------------------------------------------
 # ----------------------------------------------------------------------
 
@@ -88,10 +127,15 @@ def guess_parcel_type(image_path: str) -> str:
     return f"{color} {pkg_type}".upper()
 
 
-def _extract_unit_from_text(text: str) -> str:
+def _is_civic_number(candidate: str) -> bool:
+    return candidate in _CIVIC_NUMBERS
+
+
+def _extract_unit_from_text(text: str, building: str = "g2") -> str:
     """
     Try multiple patterns to extract a unit number from OCR text.
     Preserves alphanumeric suffixes (e.g., 204A, 1911B).
+    Skips matches that are actually the building's civic number.
     """
     patterns = [
         # Explicit keyword + optional separator + unit (with optional letter suffix)
@@ -109,7 +153,10 @@ def _extract_unit_from_text(text: str) -> str:
         for line in text.splitlines():
             m = re.search(pat, line.strip(), re.IGNORECASE)
             if m:
-                return m.group(1).upper()
+                candidate = m.group(1).upper()
+                if _is_civic_number(candidate):
+                    continue
+                return candidate
     return "UNKNOWN"
 
 
@@ -145,7 +192,7 @@ def _extract_name_from_text(text: str) -> str:
     return "UNKNOWN"
 
 
-def fallback_regex_ocr(image_path: str) -> Dict:
+def fallback_regex_ocr(image_path: str, building: str = "g2") -> Dict:
     """
     Backup OCR extraction using pytesseract + regex if Gemini fails.
     Gracefully handles missing tesseract (returns UNKNOWN for text fields).
@@ -179,7 +226,7 @@ def fallback_regex_ocr(image_path: str) -> Dict:
     supplier = next((s for s in suppliers_priority if s in text), "OTHER")
 
     return {
-        "unit": _extract_unit_from_text(text),
+        "unit": _extract_unit_from_text(text, building),
         "name": _extract_name_from_text(text),
         "supplier": supplier,
         "parcel_type": guess_parcel_type(image_path),
@@ -190,52 +237,84 @@ def fallback_regex_ocr(image_path: str) -> Dict:
 # --- GEMINI EXTRACTION ------------------------------------------------
 # ----------------------------------------------------------------------
 
-_GEMINI_PROMPT = """You are reading a shipping/delivery label photo. Extract fields from the RECIPIENT (ship-to) address only — NOT the sender/return/from address.
+def _build_main_prompt(building: str) -> str:
+    info = _building_info(building)
+    examples = "\n".join(f"  {label:<32} →  unit = {unit}" for label, unit in info["unit_examples"])
+    return f"""You are reading a shipping/delivery label photo. This parcel was scanned at **{info['name']}** — its civic/street number is **{info['civic']}**. Extract fields from the RECIPIENT (ship-to) address only — NOT the sender/return/from address.
 
-Return ONLY a JSON object with exactly these four fields:
-{
-  "unit": "<apartment or suite number>",
-  "name": "<recipient full personal name>",
-  "supplier": "<courier>",
-  "parcel_type": "<color + BOX or PACKAGE>"
-}
+Return a JSON object with exactly these four fields: unit, name, supplier, parcel_type.
 
-BUILDING CONTEXT — these labels are for two residential buildings in Toronto:
-  • 10 Graphophone Grove  (building number = 10,   apartment units are 3–4 digits, e.g. 1204, 2406)
-  • 1285 Dupont St        (building number = 1285,  apartment units are 3–4 digits, e.g. 504, 1106)
-
-ADDRESS FORMAT on these labels often reads:  <UNIT>  <BUILDING#>  <STREET NAME>
-  2406 10 GRAPHOPHONE GROVE   →  unit = 2406   (10 is the building, not the unit)
-  1507 1285 DUPONT ST         →  unit = 1507   (1285 is the building, not the unit)
-  SUITE 804, 10 GRAPHOPHONE   →  unit = 804
-
-UNIT rules:
-- Must be 3–4 digits (100–9999), with an optional trailing letter (e.g. 204A).
-- The numbers 10 and 1285 are always the building/street number — NEVER the unit.
-- Any number under 100 is NOT an apartment unit.
-- Canadian postal codes (e.g. M6H 0E5), tracking numbers, and barcodes are NOT units.
-- If genuinely absent, return "UNKNOWN".
+UNIT — how to find it:
+- The address line pairs TWO numbers: the civic number {info['civic']} (the building itself) and the apartment/unit number. They can appear in either order and are often joined by a hyphen:
+{examples}
+- The unit is always the OTHER number — {info['civic']} itself is NEVER the unit.
+- Apartment/unit numbers here are normally 3–4 digits (100–9999), with an optional trailing letter (e.g., 204A).
+- Canadian postal codes (e.g., M6H 0E5), tracking numbers, and barcodes are NOT units.
+- BE CONSERVATIVE: if you cannot find a clear, confident unit number — it's blurry, only {info['civic']} is visible, or the second number looks like a postal code/tracking number — return "UNKNOWN". A wrong guess sends the parcel to the wrong door, so "UNKNOWN" is always better than an unconfident guess.
 
 NAME rules:
 - Personal name only (First Last). Never a company, building name, or courier.
 - Check the line immediately after "SHIP TO:", "TO:", "ATTN:", or "C/O:".
-- If the label has both a company and a person, return the person.
+- If the label shows both a company and a person, return the person.
 - If only a company name exists, return "UNKNOWN".
 
-SUPPLIER — pick one:
+SUPPLIER — pick exactly one:
   AMAZON, UPS, FEDEX, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER
 
-PARCEL TYPE:
+PARCEL TYPE — describe the physical parcel shown in the photo (not the label):
 - FORM: PACKAGE (soft bag, poly mailer, padded envelope) or BOX (rigid cardboard)
 - COLOR: BROWN, WHITE, BLACK, BLUE, PINK, GREY, CLEAR
 - Amazon exceptions (only with visible Amazon/Prime branding):
     blue poly mailer  → PRIME BLUE PACKAGE
     orange wrap       → PRIME ORANGE PACKAGE
     brown box         → AMAZON BOX
-- Never use "bag", "mailer", or "envelope".
+- Never use "bag", "mailer", or "envelope"."""
 
-Return ONLY the JSON. No markdown. No explanation."""
 
+def _build_focused_prompt(building: str) -> str:
+    info = _building_info(building)
+    examples = "\n".join(f"  {label:<32} →  unit = {unit}" for label, unit in info["unit_examples"])
+    return f"""Look carefully at this shipping label. This parcel was scanned at {info['name']} (civic number {info['civic']}). Focus only on the RECIPIENT (ship-to) block, not the sender/return address.
+
+The address line pairs the civic number {info['civic']} with the apartment/unit number, in either order, often hyphenated:
+{examples}
+
+Return a JSON object with exactly two fields: unit, name.
+- unit: the 3-4 digit apartment number (never {info['civic']}, never a postal code/tracking number), or "UNKNOWN" if you're not confident.
+- name: the recipient's personal "First Last" name (check after SHIP TO:, ATTN:, C/O:), or "UNKNOWN"."""
+
+
+_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "unit": {
+            "type": "STRING",
+            "description": "3-4 digit apartment/unit number (optionally with a trailing letter), or UNKNOWN. Never the building's civic number.",
+        },
+        "name": {
+            "type": "STRING",
+            "description": "Recipient personal full name (First Last), or UNKNOWN.",
+        },
+        "supplier": {
+            "type": "STRING",
+            "description": "One of AMAZON, UPS, FEDEX, DHL, PUROLATOR, INTELCOM, CANPAR, CANADA POST, OTHER.",
+        },
+        "parcel_type": {
+            "type": "STRING",
+            "description": "Color + BOX or PACKAGE, e.g. BROWN BOX, WHITE PACKAGE, PRIME BLUE PACKAGE.",
+        },
+    },
+    "required": ["unit", "name", "supplier", "parcel_type"],
+}
+
+_FOCUSED_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "unit": {"type": "STRING"},
+        "name": {"type": "STRING"},
+    },
+    "required": ["unit", "name"],
+}
 
 # Try the higher-quality model first; fall back to a cheaper one on quota errors
 _MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"]
@@ -276,13 +355,7 @@ def _post_to_gemini(payload: dict, timeout: int):
     return response
 
 
-def extract_with_gemini(image_path: str) -> Dict:
-    """
-    Primary extraction via Gemini Vision API with image preprocessing.
-    """
-    if not _gemini_keys():
-        raise ValueError("GEMINI_API_KEY not set")
-
+def _load_image_b64(image_path: str):
     preprocessed = preprocess_image(image_path)
     try:
         with open(preprocessed, "rb") as f:
@@ -294,14 +367,56 @@ def extract_with_gemini(image_path: str) -> Dict:
             except OSError:
                 pass
 
-    # Detect mime type from extension
     ext = os.path.splitext(image_path)[1].lower()
     mime = "image/png" if ext == ".png" else "image/jpeg"
+    return image_data, mime
+
+
+def _parse_json_response(raw: str) -> Dict:
+    """
+    Structured output (responseSchema) should already return clean JSON, but
+    defensively strip code fences / salvage partial output just in case.
+    """
+    raw = raw.strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    cleaned = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
+    json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    print(f"[WARN] JSON parse failed — salvaging fields from partial output:\n{raw}")
+    data = {}
+    for field in ("unit", "name", "supplier", "parcel_type"):
+        m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
+        if m:
+            data[field] = m.group(1)
+    if not data:
+        raise Exception(f"No valid JSON in Gemini output:\n{raw}")
+    return data
+
+
+def extract_with_gemini(image_path: str, building: str = "g2") -> Dict:
+    """
+    Primary extraction via Gemini Vision API with image preprocessing.
+    Uses structured output (responseSchema) so the model is constrained to
+    return exactly the four fields we need, every time.
+    """
+    if not _gemini_keys():
+        raise ValueError("GEMINI_API_KEY not set")
+
+    image_data, mime = _load_image_b64(image_path)
 
     payload = {
         "contents": [{
             "parts": [
-                {"text": _GEMINI_PROMPT},
+                {"text": _build_main_prompt(building)},
                 {"inline_data": {"mime_type": mime, "data": image_data}},
             ]
         }],
@@ -310,6 +425,8 @@ def extract_with_gemini(image_path: str) -> Dict:
             "topP": 1,
             "topK": 1,
             "maxOutputTokens": 1024,
+            "responseMimeType": "application/json",
+            "responseSchema": _RESPONSE_SCHEMA,
         },
     }
 
@@ -323,29 +440,8 @@ def extract_with_gemini(image_path: str) -> Dict:
     if not result.get("candidates"):
         raise Exception("No candidates in Gemini response")
 
-    raw = result["candidates"][0]["content"]["parts"][0].get("text", "").strip()
-
-    # Strip markdown code fences if present
-    raw = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
-
-    # Try standard JSON parse first (greedy match to handle multi-line)
-    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if json_match:
-        try:
-            data = json.loads(json_match.group(0))
-            return _normalize(data, image_path)
-        except json.JSONDecodeError:
-            pass
-
-    # Gemini output was truncated — salvage field values with targeted regex
-    print(f"[WARN] JSON parse failed — salvaging fields from partial output:\n{raw}")
-    data = {}
-    for field in ("unit", "name", "supplier", "parcel_type"):
-        m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
-        if m:
-            data[field] = m.group(1)
-    if not data:
-        raise Exception(f"No valid JSON in Gemini output:\n{raw}")
+    raw = result["candidates"][0]["content"]["parts"][0].get("text", "")
+    data = _parse_json_response(raw)
     return _normalize(data, image_path)
 
 
@@ -359,9 +455,8 @@ def _normalize(data: Dict, image_path: str) -> Dict:
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
     unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
 
-    # Reject building/street numbers and numbers too small to be apartment units
-    _STREET_NUMBERS = {"10", "1285"}
-    if unit_candidate in _STREET_NUMBERS:
+    # Reject either building's civic number and numbers too small to be apartment units
+    if _is_civic_number(unit_candidate):
         unit_candidate = "UNKNOWN"
     elif unit_candidate.isdigit() and int(unit_candidate) < 100:
         unit_candidate = "UNKNOWN"
@@ -390,25 +485,7 @@ def _normalize(data: Dict, image_path: str) -> Dict:
 # --- RETRY WITH FOCUSED PROMPT ----------------------------------------
 # ----------------------------------------------------------------------
 
-_FOCUSED_PROMPT = """Look carefully at this shipping label. Focus only on the RECIPIENT (ship-to) block, not the sender/return address.
-
-BUILDING CONTEXT:
-  • 10 Graphophone Grove, Toronto  — building number = 10,   apartment units are 3–4 digits
-  • 1285 Dupont St, Toronto        — building number = 1285,  apartment units are 3–4 digits
-
-Address lines on these labels often read:  <UNIT> <BUILDING#> <STREET>
-  2406 10 GRAPHOPHONE GROVE  →  unit = 2406  (10 is the building, not the unit)
-  1507 1285 DUPONT ST        →  unit = 1507  (1285 is the building, not the unit)
-
-Return ONLY:
-{"unit": "<3-4 digit apartment number, or UNKNOWN>", "name": "<First Last personal name, or UNKNOWN>"}
-
-Rules:
-- Unit must be 100–9999. Never 10, never 1285, never a postal code or tracking number.
-- Name must be a personal name. Check after SHIP TO:, ATTN:, C/O:."""
-
-
-def _retry_focused(image_path: str, current: Dict) -> Dict:
+def _retry_focused(image_path: str, current: Dict, building: str = "g2") -> Dict:
     """
     If unit or name is still UNKNOWN after first pass, do a second focused call.
     """
@@ -418,28 +495,23 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
     if not _gemini_keys():
         return current
 
-    preprocessed = preprocess_image(image_path)
-    try:
-        with open(preprocessed, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode()
-    finally:
-        if preprocessed != image_path:
-            try:
-                os.unlink(preprocessed)
-            except OSError:
-                pass
-
-    ext = os.path.splitext(image_path)[1].lower()
-    mime = "image/png" if ext == ".png" else "image/jpeg"
+    image_data, mime = _load_image_b64(image_path)
 
     payload = {
         "contents": [{
             "parts": [
-                {"text": _FOCUSED_PROMPT},
+                {"text": _build_focused_prompt(building)},
                 {"inline_data": {"mime_type": mime, "data": image_data}},
             ]
         }],
-        "generationConfig": {"temperature": 0, "topP": 1, "topK": 1, "maxOutputTokens": 512},
+        "generationConfig": {
+            "temperature": 0,
+            "topP": 1,
+            "topK": 1,
+            "maxOutputTokens": 512,
+            "responseMimeType": "application/json",
+            "responseSchema": _FOCUSED_RESPONSE_SCHEMA,
+        },
     }
 
     try:
@@ -449,17 +521,13 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
         result = resp.json()
         if not result.get("candidates"):
             return current
-        raw = result["candidates"][0]["content"]["parts"][0].get("text", "").strip()
-        raw = re.sub(r"```(?:json)?\s*|\s*```", "", raw).strip()
-        jm = re.search(r"\{.*?\}", raw, re.DOTALL)
-        if not jm:
-            return current
-        retry_data = json.loads(jm.group(0))
+        raw = result["candidates"][0]["content"]["parts"][0].get("text", "")
+        retry_data = _parse_json_response(raw)
 
         if current.get("unit") == "UNKNOWN":
             unit_raw = str(retry_data.get("unit", "")).strip().upper()
             m = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
-            if m:
+            if m and not _is_civic_number(m.group(1)):
                 current["unit"] = m.group(1)
                 print(f"  Retry resolved unit: {current['unit']}")
 
@@ -478,28 +546,31 @@ def _retry_focused(image_path: str, current: Dict) -> Dict:
 # --- MAIN WRAPPER -----------------------------------------------------
 # ----------------------------------------------------------------------
 
-def extract_data(image_path: str) -> Dict:
+def extract_data(image_path: str, building: str = "g2") -> Dict:
     """
     Unified interface: Gemini first → focused retry → fallback OCR.
+    `building` ('g1' or 'g2') tells Gemini the parcel's civic address so it
+    can pinpoint the unit number with near-certainty instead of guessing
+    between two numbers on the label.
     """
     print(f"\n{'='*60}")
-    print(f"ANALYZING: {os.path.basename(image_path)}")
+    print(f"ANALYZING: {os.path.basename(image_path)} (building={building})")
     print(f"{'='*60}\n")
 
     try:
-        result = extract_with_gemini(image_path)
+        result = extract_with_gemini(image_path, building)
     except Exception as e:
         print(f"[WARN] Gemini failed: {e}\nUsing fallback OCR...")
-        result = fallback_regex_ocr(image_path)
+        result = fallback_regex_ocr(image_path, building)
 
     # Second pass: focused retry for any remaining UNKNOWN fields
-    result = _retry_focused(image_path, result)
+    result = _retry_focused(image_path, result, building)
 
     # Final fallback fill for any still-missing fields
     for key in ["unit", "name", "supplier", "parcel_type"]:
         if not result.get(key) or result[key] == "UNKNOWN":
             print(f"[WARN] {key} still unknown — filling via OCR fallback...")
-            backup = fallback_regex_ocr(image_path)
+            backup = fallback_regex_ocr(image_path, building)
             if backup.get(key) and backup[key] != "UNKNOWN":
                 result[key] = backup[key]
 
@@ -522,14 +593,17 @@ def extract_data(image_path: str) -> Dict:
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python ocr_utils.py <image_path>")
+        print("Usage: python ocr_utils.py <image_path> [building: g1|g2]")
         sys.exit(1)
 
     path = sys.argv[1]
+    bld = sys.argv[2].lower() if len(sys.argv) > 2 else "g2"
+    if bld not in ("g1", "g2"):
+        bld = "g2"
     if not os.path.exists(path):
         print(f"File not found: {path}")
         sys.exit(1)
 
-    result = extract_data(path)
+    result = extract_data(path, bld)
     print("\nJSON OUTPUT:")
     print(json.dumps(result, indent=2))

@@ -161,7 +161,7 @@ def upload_parcel():
         def process(job_id, temp_path, building):
             try:
                 print(f"\n[{job_id}] OCR start (building={building})")
-                result = analyze_parcel(temp_path)
+                result = analyze_parcel(temp_path, building)
                 if isinstance(result, list):
                     result = result[0] if result else {}
 
