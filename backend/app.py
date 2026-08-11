@@ -4,7 +4,7 @@ import sys
 import inspect
 import traceback
 
-# Force Python to always import local modules from the same directory as app.py
+# Import local modules from this directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
@@ -13,17 +13,15 @@ from vision_utils import analyze_parcel
 from sheet_utils import append_row
 from datetime import datetime
 
-# Print absolute import paths to verify correct module loading
 print("🔍 vision_utils loaded from:", inspect.getfile(analyze_parcel))
 print("🔍 sheet_utils loaded from:", inspect.getfile(append_row))
 
-# Import modules to check their file paths
 import vision_utils
 import ocr_utils
 print("🧠 vision_utils module loaded from:", inspect.getfile(vision_utils))
 print("🧠 ocr_utils module loaded from:", inspect.getfile(ocr_utils))
 
-# ---- Always resolve paths relative to this file ----
+# Resolve paths relative to this file
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = (
     os.path.join(BASE_DIR, "backend", "templates")
@@ -51,12 +49,7 @@ def home():
 
 @app.route("/upload", methods=["POST"])
 def upload_parcel():
-    """
-    Endpoint for image uploads from the frontend.
-    Performs OCR + parcel-type detection,
-    logs structured data to Google Sheets,
-    and saves an image copy for record-keeping.
-    """
+    """Run OCR on an uploaded image, log it to Sheets and keep a copy."""
     try:
         if "file" not in request.files:
             return jsonify({"error": "No file part"}), 400
@@ -68,18 +61,16 @@ def upload_parcel():
         temp_path = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(temp_path)
 
-        # 🧩 Debug: print exactly what analyze_parcel returns
         print("DEBUG calling analyze_parcel() ...")
         result = analyze_parcel(temp_path)
         print("DEBUG type:", type(result))
         print("DEBUG result preview:", str(result)[:300])
 
-        # ✅ Handle case where analyze_parcel() returns a list accidentally
+        # analyze_parcel() sometimes returns a list
         if isinstance(result, list):
-            print("⚠️ analyze_parcel() returned a list — taking first element")
+            print("⚠️ analyze_parcel() returned a list, taking first element")
             result = result[0] if result else {}
 
-        # 🔍 DETAILED DEBUG: Log types and values before safe_name construction
         print("=" * 50)
         print("🔍 DETAILED DEBUG BEFORE safe_name CONSTRUCTION:")
         print(f"  result type: {type(result)}")
@@ -87,7 +78,6 @@ def upload_parcel():
         print(f"  result is dict: {isinstance(result, dict)}")
         print(f"  result is list: {isinstance(result, list)}")
         
-        # Test each .get() call individually
         try:
             unit_val = result.get('unit', 'UNKNOWN')
             print(f"  result.get('unit', 'UNKNOWN') = {unit_val} (type: {type(unit_val)})")
@@ -129,12 +119,10 @@ def upload_parcel():
         final_path = os.path.join(UPLOAD_FOLDER, safe_name)
         os.rename(temp_path, final_path)
 
-        # 🔍 DETAILED DEBUG: Log types and values before row construction
         print("=" * 50)
         print("🔍 DETAILED DEBUG BEFORE row CONSTRUCTION:")
         print(f"  timestamp_readable: {timestamp_readable} (type: {type(timestamp_readable)})")
-        
-        # Test each .get() call for row construction individually
+
         try:
             row_unit = result.get("unit", "UNKNOWN")
             print(f"  result.get('unit', 'UNKNOWN') = {row_unit} (type: {type(row_unit)})")

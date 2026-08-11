@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""
-Inject the 1Valet auto-listener into a Chrome tab via the Chrome DevTools Protocol (CDP).
+"""Inject the 1Valet listener into a Chrome tab over the DevTools Protocol.
 
-One-time Chrome setup — run Chrome with the debug port flag:
-  macOS:  open -a "Google Chrome" --args --remote-debugging-port=9222
-  Linux:  google-chrome --remote-debugging-port=9222 &
-  Windows: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222
-
-Or add  --remote-debugging-port=9222  permanently to your Chrome desktop shortcut.
-After that first launch, start.sh handles everything automatically.
+Chrome has to be started once with --remote-debugging-port=9222:
+  macOS:   open -a "Google Chrome" --args --remote-debugging-port=9222
+  Linux:   google-chrome --remote-debugging-port=9222 &
+  Windows: chrome.exe --remote-debugging-port=9222
 """
 
 import sys
@@ -18,7 +14,7 @@ import urllib.request
 import urllib.error
 
 CDP_PORT = 9222
-TAB_INDEX = 2   # 0-based index — tab 3 in the browser bar
+TAB_INDEX = 2   # 0-based, so tab 3 in the browser bar
 
 
 def _get_tabs():
@@ -34,12 +30,12 @@ def _get_tabs():
 def _find_tab(tabs):
     page_tabs = [t for t in tabs if t.get("type") == "page"]
 
-    # Prefer the actual 1Valet tab by URL (most reliable)
+    # Prefer the 1Valet tab by URL
     for t in page_tabs:
         if "1valetbas" in t.get("url", "").lower():
             return t, "1Valet URL match"
 
-    # Fall back to fixed tab index (tab 3 = index 2)
+    # Fall back to the fixed tab index
     if TAB_INDEX < len(page_tabs):
         return page_tabs[TAB_INDEX], f"tab index {TAB_INDEX} (tab {TAB_INDEX + 1})"
 
@@ -82,7 +78,7 @@ def _load_script(server_url: str) -> str:
 
 
 def _launch_chrome_with_debug():
-    """Try to open Chrome with the debug flag if it's not already running."""
+    """Open Chrome with the debug flag if it isn't already running."""
     import subprocess, platform
     plat = platform.system()
     try:
@@ -150,7 +146,7 @@ def main():
 
     print(f"   SERVER_URL injected: {server_url}")
 
-    # Verify the script globals landed on the window
+    # Confirm the globals landed on the window
     verify = _inject(tab, "typeof window.startValetListener === 'function'")
     confirmed = verify.get("result", {}).get("result", {}).get("value", False)
     if confirmed:
@@ -159,7 +155,7 @@ def main():
         print("⚠️   startValetListener not found — injection may have failed")
         return
 
-    # Check whether the ADD DELIVERY popup (suite input) is already open
+    # Is the ADD DELIVERY popup already open?
     popup_check = _inject(tab, """
         (function() {
             var inputs = Array.prototype.slice.call(document.querySelectorAll('input'));

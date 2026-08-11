@@ -1,7 +1,4 @@
-"""
-app2.py - ParcelVision with Remote 1Valet Control
-(HTTP Version for NGROK — multi-building G1/G2)
-"""
+"""ParcelVision server: parcel intake, Sheets logging and 1Valet control (G1/G2)."""
 
 from flask import Flask, request, jsonify, render_template
 from flask_socketio import SocketIO, join_room
@@ -15,10 +12,9 @@ import uuid
 from datetime import datetime
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Import local modules
+# Import local modules from this directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
@@ -48,18 +44,18 @@ CORS_ORIGINS = [
 _ws_origins = [o for o in CORS_ORIGINS if o]
 socketio = SocketIO(app, cors_allowed_origins=_ws_origins, async_mode="threading")
 
-# ── Per-building queues ────────────────────────────────────────────────
+# Per-building queues
 pending_units_queue: dict = {"g1": [], "g2": []}
 release_queue:       dict = {"g1": [], "g2": []}
 
-# Job results store for async upload processing
+# Async upload results, keyed by job id
 job_results: dict = {}
 
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# ── CORS (HTTP endpoints — handle both 1Valet origins) ────────────────
+# CORS for both 1Valet origins
 def _allowed_origin(origin: str) -> bool:
     return origin in CORS_ORIGINS
 
@@ -78,7 +74,7 @@ def valet_preflight(subpath):
     return "", 204
 
 
-# ── SocketIO: building-specific rooms ─────────────────────────────────
+# SocketIO rooms, one per building
 @socketio.on("join_building")
 def on_join_building(data):
     building = data.get("building", "g2")
@@ -87,10 +83,10 @@ def on_join_building(data):
         print(f"[SocketIO] Client joined room: {building}")
 
 
-# ── Background sheet pollers (one per building) ───────────────────────
+# Background sheet poller, one thread per building
 def _poll_sheet_releases(building: str):
     import time
-    print(f"[ReleasePoller-{building}] Started — checking sheet every 5s")
+    print(f"[ReleasePoller-{building}] Started, checking sheet every 5s")
     while True:
         try:
             ws = connect_to_sheet(building)
@@ -122,9 +118,7 @@ for _bld in ("g1", "g2"):
     threading.Thread(target=_poll_sheet_releases, args=(_bld,), daemon=True).start()
 
 
-# ============================================================
-# ROUTES
-# ============================================================
+# Routes
 
 @app.route("/")
 def home():
@@ -136,10 +130,7 @@ def home():
 
 @app.route("/upload", methods=["POST"])
 def upload_parcel():
-    """
-    Saves image and returns job_id immediately (HTTP 202).
-    Processing runs in background; phone polls /result/<job_id>.
-    """
+    """Save the image and return a job id. The phone polls /result/<job_id>."""
     try:
         if "file" not in request.files:
             return jsonify({"error": "No file part"}), 400

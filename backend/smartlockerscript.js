@@ -1,11 +1,11 @@
 /**
- * 1VALET AUTO-LISTENER — injected automatically by start.sh via Chrome CDP.
- * SERVER_URL is filled in at injection time — no manual editing needed.
+ * 1Valet listener, injected by start.sh over Chrome CDP.
+ * SERVER_URL is filled in at injection time.
  */
 (function () {
     'use strict';
 
-    // Filled in by inject_tab.py at startup — do not edit manually.
+    // Filled in by inject_tab.py at startup.
     const SERVER_URL = "__SERVER_URL__";
 
     const CONFIG = { pollInterval: 5000, autoStart: true };
@@ -13,7 +13,7 @@
 
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    // Build fetch headers — include ngrok bypass header only when needed
+    // Add the ngrok bypass header only when the tunnel needs it
     function headers(extra) {
         const h = { 'Content-Type': 'application/json', ...extra };
         if (SERVER_URL.includes('ngrok') || SERVER_URL.includes('trycloudflare')) {

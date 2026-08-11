@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────
-# ParcelVision — one-command startup
-#   • Creates SSH tunnel (serveo.net → localhost.run → local IP fallback)
-#   • Updates smartlockerscript.txt and smartlockerscript_g1.txt with URL
-#   • Starts Flask on port 5002
-#
-# Usage (Git Bash on Windows):  ./start.sh
-# ─────────────────────────────────────────────────────────────────────
+# Starts Flask on 5002, opens an SSH tunnel, and writes the public URL
+# into the SmartLocker scripts.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND="$SCRIPT_DIR/backend"
 ENV_FILE="$BACKEND/.env"
 
-# ── Colours ───────────────────────────────────────────────────────────
+# Colours
 C_CYAN='\033[0;36m'; C_GREEN='\033[0;32m'
 C_YELLOW='\033[1;33m'; C_RESET='\033[0m'
 info()  { echo -e "${C_CYAN}  $*${C_RESET}"; }
@@ -26,7 +20,7 @@ echo "  ParcelVision -- Starting up"
 echo "============================================================"
 echo ""
 
-# ── Load .env ─────────────────────────────────────────────────────────
+# Load .env
 if [ -f "$ENV_FILE" ]; then
     while IFS='=' read -r key rest; do
         [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
@@ -34,7 +28,7 @@ if [ -f "$ENV_FILE" ]; then
     done < <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" 2>/dev/null)
 fi
 
-# ── Detect Python ─────────────────────────────────────────────────────
+# Detect Python
 VENV_PY="$SCRIPT_DIR/backend/venv/Scripts/python"
 if [ -f "$VENV_PY" ]; then
     PY="$VENV_PY"
@@ -51,7 +45,7 @@ FLASK_PID=""
 TUNNEL_PID=""
 TUNNEL_LOG="$SCRIPT_DIR/.tunnel.log"
 
-# ── Open Windows Firewall for port 5002 ───────────────────────────────
+# Open the Windows firewall for port 5002
 if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     netsh advfirewall firewall add rule \
         name="ParcelVision Flask 5002" dir=in action=allow \
@@ -59,7 +53,7 @@ if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
         >/dev/null 2>&1 || true
 fi
 
-# ── Start Flask ───────────────────────────────────────────────────────
+# Start Flask
 echo ""
 info "Starting Flask server (app2.py) on port 5002..."
 cd "$BACKEND"
@@ -73,7 +67,7 @@ for i in $(seq 1 20); do
 done
 ok "Flask is ready on port 5002."
 
-# ── SSH Tunnel ────────────────────────────────────────────────────────
+# SSH tunnel
 SERVER_URL=""
 
 try_tunnel() {
@@ -102,7 +96,7 @@ try_tunnel() {
     done
     kill "$TUNNEL_PID" 2>/dev/null || true
     TUNNEL_PID=""
-    warn "$label failed — no URL received within 15s."
+    warn "$label failed - no URL received within 15s."
     return 1
 }
 
@@ -110,7 +104,7 @@ try_tunnel "serveo.net" "serveo.net" "serveo.net" \
     || try_tunnel "localhost.run" "nokey" "localhost.run" \
     || true
 
-# ── Local IP fallback if both tunnels failed ──────────────────────────
+# Fall back to the LAN IP if both tunnels failed
 if [ -z "$SERVER_URL" ]; then
     LOCAL_IP=""
     if [[ "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
@@ -122,15 +116,15 @@ if [ -z "$SERVER_URL" ]; then
     fi
     if [ -n "${LOCAL_IP:-}" ]; then
         SERVER_URL="http://$LOCAL_IP:5002"
-        warn "No tunnel — using LAN IP: $SERVER_URL"
+        warn "No tunnel - using LAN IP: $SERVER_URL"
         warn "Phone must be on the same network as this machine."
     else
         SERVER_URL="http://localhost:5002"
-        warn "No tunnel — using localhost only (phone upload won't work)."
+        warn "No tunnel - using localhost only (phone upload won't work)."
     fi
 fi
 
-# ── Update SERVER_URL in SmartLocker scripts ──────────────────────────
+# Write the URL into the SmartLocker scripts
 URL_PATTERN='s|const SERVER_URL = "[^"]*";|const SERVER_URL = "'"${SERVER_URL}"'";|'
 
 for SCRIPT in "$BACKEND/smartlockerscript.txt" "$BACKEND/smartlockerscript_g1.txt"; do
@@ -140,7 +134,7 @@ for SCRIPT in "$BACKEND/smartlockerscript.txt" "$BACKEND/smartlockerscript_g1.tx
     fi
 done
 
-# ── Banner ────────────────────────────────────────────────────────────
+# Banner
 echo ""
 echo "============================================================"
 echo "  Flask     : http://localhost:5002"
@@ -148,14 +142,14 @@ echo ""
 echo "  >>> PUBLIC URL (phone + SmartLocker scripts): <<<"
 echo "      $SERVER_URL"
 echo ""
-echo "  Paste smartlockerscript.txt     → G2 1Valet tab"
-echo "  Paste smartlockerscript_g1.txt  → G1 1Valet tab"
+echo "  Paste smartlockerscript.txt     -> G2 1Valet tab"
+echo "  Paste smartlockerscript_g1.txt  -> G1 1Valet tab"
 echo ""
 echo "  Press Ctrl+C to stop"
 echo "============================================================"
 echo ""
 
-# ── Cleanup on exit ───────────────────────────────────────────────────
+# Cleanup on exit
 cleanup() {
     echo ""
     info "Shutting down..."

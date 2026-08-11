@@ -32,15 +32,11 @@ def connect_to_sheet(building: str = "g2"):
 
 
 def _write_checkbox(sheet, row: int, col: int, checked: bool = False):
-    """
-    Force cell (1-based row/col) to render as a real interactive checkbox holding
-    the given boolean value, regardless of whether it was pre-formatted.
+    """Write a real checkbox into a cell (1-based row/col).
 
-    A plain value write to a cell with no checkbox data-validation shows the
-    literal text TRUE/FALSE instead of a checkbox — and an empty cell doesn't
-    match a FALSE filter. Re-applying the BOOLEAN validation + value together
-    guarantees the cell always looks and behaves exactly like the manually
-    inserted checkboxes (unchecked, matches FALSE filter).
+    Writing a bare boolean to a cell without BOOLEAN validation renders the
+    text TRUE/FALSE, and an empty cell doesn't match a FALSE filter. Setting
+    the value and the validation together avoids both.
     """
     sheet.spreadsheet.batch_update({
         "requests": [{
@@ -69,8 +65,7 @@ def _write_checkbox(sheet, row: int, col: int, checked: bool = False):
 
 
 def append_row(row_data, building: str = "g2"):
-    """
-    Append a parcel entry to the Google Sheet.
+    """Append a parcel entry.
 
     Args:
         row_data (list): [timestamp, unit, name, supplier, parcel_type]
@@ -87,12 +82,12 @@ def append_row(row_data, building: str = "g2"):
             f"Expected: [timestamp, unit, name, supplier, parcel_type]"
         )
 
-    # col_values(1) returns only cells with actual values — ignores pre-formatted
-    # checkbox rows that values.append would otherwise treat as "data"
+    # col_values(1) skips pre-formatted checkbox rows that values.append
+    # would otherwise count as data
     col_a = sheet.col_values(1)
-    next_row = max(len(col_a) + 1, 2)  # at least row 2 (after header)
+    next_row = max(len(col_a) + 1, 2)  # at least row 2, after the header
     sheet.update(f"A{next_row}:E{next_row}", [row_data], value_input_option="RAW")
-    # Released checkbox (F) — always re-create as a real unchecked checkbox
+    # Released checkbox in column F
     _write_checkbox(sheet, next_row, 6, checked=False)
     print(f"[{building.upper()}] Added new parcel entry at row {next_row}")
     return row_data
