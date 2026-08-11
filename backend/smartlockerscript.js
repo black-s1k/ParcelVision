@@ -23,12 +23,12 @@
     }
 
     async function addUnit(unitNumber) {
-        console.log(`\n📦 Adding unit: ${unitNumber}...`);
+        console.log(`\nAdding unit: ${unitNumber}...`);
         try {
             const input = [...document.querySelectorAll('input')].find(
                 inp => inp.placeholder && inp.placeholder.toLowerCase().includes('suite') && inp.offsetParent !== null
             );
-            if (!input) { console.error('❌ Input field not found — is the popup still open?'); return false; }
+            if (!input) { console.error('Input field not found. Is the popup still open?'); return false; }
 
             input.value = ''; input.focus();
             for (const char of unitNumber) {
@@ -37,7 +37,7 @@
                 await sleep(50);
             }
             input.dispatchEvent(new Event('change', { bubbles: true }));
-            console.log(`  ✓ Typed: ${unitNumber}`);
+            console.log(`  Typed: ${unitNumber}`);
             await sleep(800);
 
             const match = [...document.querySelectorAll('div, li, span')].find(el => {
@@ -47,23 +47,23 @@
 
             if (match) {
                 match.click();
-                console.log(`  ✓ Selected: ${unitNumber}`);
-                console.log('✅ Unit added!\n');
+                console.log(`  Selected: ${unitNumber}`);
+                console.log('Unit added.\n');
             } else {
-                console.log('  ⚠️ Trying Enter key...');
+                console.log('  Trying Enter key...');
                 input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
                 await sleep(300);
-                console.log('✅ Enter pressed\n');
+                console.log('Enter pressed.\n');
             }
 
             await sleep(1000);
             const refocus = [...document.querySelectorAll('input')].find(
                 inp => inp.placeholder && inp.placeholder.toLowerCase().includes('suite') && inp.offsetParent !== null
             );
-            if (refocus) { refocus.focus(); console.log('↪️ Re-focused input.'); }
+            if (refocus) { refocus.focus(); console.log('Re-focused input.'); }
             return true;
         } catch (err) {
-            console.error('❌ Error:', err.message);
+            console.error('Error:', err.message);
             return false;
         }
     }
@@ -76,12 +76,12 @@
             const data = await res.json();
             if (data.status === 'empty' || data.units.length === 0) return;
 
-            console.log(`\n📋 ${data.count} pending unit(s)`);
+            console.log(`\n${data.count} pending unit(s)`);
             const unitData = data.units[0];
             const unit = unitData.unit;
 
             if (state.processedUnits.has(unit)) {
-                console.log(`⏭️  Skipping ${unit} (already done)`);
+                console.log(`Skipping ${unit} (already done)`);
                 await fetch(`${SERVER_URL}/valet/complete`, {
                     method: 'POST',
                     headers: headers(),
@@ -90,7 +90,7 @@
                 return;
             }
 
-            console.log(`🔄 Processing: ${unit} (${unitData.name})`);
+            console.log(`Processing: ${unit} (${unitData.name})`);
             state.isProcessing = true;
             const success = await addUnit(unit);
             if (success) {
@@ -100,54 +100,54 @@
                     headers: headers(),
                     body: JSON.stringify({ unit, success: true }),
                 });
-                console.log(`✅ Confirmed: ${unit}`);
+                console.log(`Confirmed: ${unit}`);
             }
             state.isProcessing = false;
         } catch (err) {
-            console.error('❌ Polling error:', err.message);
+            console.error('Polling error:', err.message);
             state.isProcessing = false;
         }
     }
 
     function startListener() {
-        if (state.isRunning) { console.log('⚠️ Already running'); return; }
+        if (state.isRunning) { console.log('Listener already running'); return; }
         const input = [...document.querySelectorAll('input')].find(
             inp => inp.placeholder && inp.placeholder.toLowerCase().includes('suite')
         );
         if (!input) {
-            console.error('❌ "ADD DELIVERY" popup not open!');
-            console.log('💡 Click "ADD DELIVERY" first, then call startValetListener()');
+            console.error('"ADD DELIVERY" popup is not open.');
+            console.log('Click "ADD DELIVERY" first, then call startValetListener()');
             return;
         }
         state.isRunning = true;
         console.log('\n' + '='.repeat(60));
-        console.log('🚀 1VALET AUTO-LISTENER STARTED');
+        console.log('1Valet listener started');
         console.log('='.repeat(60));
-        console.log(`📡 Server: ${SERVER_URL}`);
-        console.log(`⏱️  Poll:   every ${CONFIG.pollInterval / 1000}s`);
-        console.log('✋ Stop:   stopValetListener()');
+        console.log(`Server:   ${SERVER_URL}`);
+        console.log(`Poll:     every ${CONFIG.pollInterval / 1000}s`);
+        console.log('Stop:     stopValetListener()');
         console.log('='.repeat(60) + '\n');
         state.pollTimer = setInterval(checkForPendingUnits, CONFIG.pollInterval);
         checkForPendingUnits();
     }
 
     function stopListener() {
-        if (!state.isRunning) { console.log('⚠️ Not running'); return; }
+        if (!state.isRunning) { console.log('Listener not running'); return; }
         clearInterval(state.pollTimer);
         state.isRunning = false;
-        console.log('\n🛑 Listener stopped');
+        console.log('\nListener stopped');
     }
 
     function checkStatus() {
-        console.log('\n📊 STATUS\n' + '='.repeat(60));
-        console.log(`Running:    ${state.isRunning ? '✅ Yes' : '❌ No'}`);
-        console.log(`Processing: ${state.isProcessing ? '✅ Yes' : '❌ No'}`);
+        console.log('\nSTATUS\n' + '='.repeat(60));
+        console.log(`Running:    ${state.isRunning ? 'Yes' : 'No'}`);
+        console.log(`Processing: ${state.isProcessing ? 'Yes' : 'No'}`);
         console.log(`Processed:  ${[...state.processedUnits].join(', ') || 'none'}`);
         console.log(`Server:     ${SERVER_URL}`);
         console.log('='.repeat(60) + '\n');
     }
 
-    function clearCache() { state.processedUnits.clear(); console.log('✅ Cache cleared'); }
+    function clearCache() { state.processedUnits.clear(); console.log('Cache cleared'); }
 
     window.startValetListener = startListener;
     window.stopValetListener  = stopListener;
@@ -156,9 +156,9 @@
     window.addUnit            = addUnit;
 
     console.log(`
-╔══════════════════════════════════════════════════════════╗
-║  1VALET AUTO-LISTENER  —  injected by ParcelVision       ║
-╚══════════════════════════════════════════════════════════╝
+============================================================
+  1Valet listener, injected by ParcelVision
+============================================================
   Server : ${SERVER_URL}
   Start  : startValetListener()
   Stop   : stopValetListener()
@@ -166,7 +166,7 @@
 `);
 
     if (CONFIG.autoStart) {
-        console.log('🔄 Auto-starting in 3s...\n');
+        console.log('Auto-starting in 3s...\n');
         setTimeout(startListener, 3000);
     }
 })();

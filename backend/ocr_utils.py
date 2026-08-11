@@ -305,7 +305,7 @@ def _post_to_gemini(payload: dict, timeout: int):
             print(f"Sending image to Gemini Vision API ({model}, key ...{api_key[-4:]})...")
             response = requests.post(url, json=payload, timeout=timeout)
             if response.status_code == 429:
-                print(f"[WARN] {model} quota exceeded for key ...{api_key[-4:]} — trying next...")
+                print(f"[WARN] {model} quota exceeded for key ...{api_key[-4:]}, trying next...")
                 continue
             return response
     return response

@@ -182,7 +182,7 @@ def upload_parcel():
 
                 if not unit or unit == "UNKNOWN":
                     valet_status  = "error"
-                    alert_message = f"UNIT NOT RECOGNIZED — parcel for: {name}"
+                    alert_message = f"UNIT NOT RECOGNIZED. Parcel for: {name}"
                     print(f"[{job_id}] {alert_message}")
                 else:
                     pending_units_queue[building].append({

@@ -18,11 +18,11 @@
         font-family="SFMono-Regular,Consolas,Liberation Mono,Menlo,monospace"
         font-size="12" fill="#6e7681">parcelvision — ocr_utils.py</text>
 
-  <!-- ─── Content: 18 s loop ─────────────────────────────────────────
+  <!--  Content: 18 s loop 
        All lines: values="0;0;1;1;0"
        keyTimes:  "0; appear/18; (appear+0.2)/18; 15/18; 1"
        Disappear threshold: 15 s → keyTime 0.8333
-  ─────────────────────────────────────────────────────────────────── -->
+   -->
 
   <!-- t = 1.0 s  →  $ python ocr_utils.py uploads/label.jpg -->
   <g>

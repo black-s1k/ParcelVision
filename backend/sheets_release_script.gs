@@ -47,7 +47,7 @@ function onEdit(e) {
       muteHttpExceptions: true
     };
     const response = UrlFetchApp.fetch(SERVER_URL + "/valet/release", options);
-    Logger.log(`Release queued for unit ${unit} — server response: ${response.getContentText()}`);
+    Logger.log(`Release queued for unit ${unit}, server response: ${response.getContentText()}`);
   } catch (err) {
     Logger.log(`Error queuing release for unit ${unit}: ${err.message}`);
   }
