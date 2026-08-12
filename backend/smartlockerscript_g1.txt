@@ -1,22 +1,15 @@
 /**
- * 1VALET AUTO-LISTENER - Work PC Browser Script
- * Galleria 1 -- 1285 Dupont St
+ * 1Valet listener for Galleria 1, 1285 Dupont St.
  *
- * Polls the ParcelVision server for pending deliveries and auto-enters
- * unit numbers into the 1Valet "ADD DELIVERY" popup.
- *
- * SERVER_URL is updated automatically by start.sh on each run.
+ * Polls the ParcelVision server for pending deliveries and types unit
+ * numbers into the 1Valet "ADD DELIVERY" popup.
  */
 (function() {
     'use strict';
 
-    // ============================================================
-    // SERVER URL -- updated automatically by start.sh
-    // ============================================================
-
+    // Rewritten by start.sh on each run
     const SERVER_URL = "https://72bf0081d337.ngrok-free.app";
 
-    // ============================================================
 
     const BUILDING = "g1";
 

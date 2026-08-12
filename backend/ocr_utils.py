@@ -1,7 +1,4 @@
-"""
-Parcel label extraction using Google Gemini Vision API + local OCR/color fallback.
-Prioritizes local suppliers: Amazon, UPS, FedEx, UNI, Dragonfly, Emile, FleetOptics.
-"""
+"""Parcel label extraction via Gemini Vision, with a local OCR fallback."""
 
 import os
 import base64
@@ -15,14 +12,8 @@ import numpy as np
 import pytesseract
 
 
-# ----------------------------------------------------------------------
-# --- BUILDING CONTEXT --------------------------------------------------
-# ----------------------------------------------------------------------
-# The concierge already tells us which building a parcel was scanned at —
-# feeding that civic address to Gemini turns "which of these two numbers is
-# the unit?" from a guess into a near-deterministic lookup, and lets us
-# reject the civic number outright if the model still returns it.
-
+# Civic address per building. Knowing it turns "which of these two numbers is
+# the unit?" into a lookup, and lets us reject the civic number if it comes back.
 _BUILDING_INFO = {
     "g1": {
         "name": "1285 Dupont St, Toronto",
@@ -44,9 +35,8 @@ _BUILDING_INFO = {
     },
 }
 
-# Civic numbers for both buildings are never valid units — reject either,
-# regardless of which building the parcel was scanned at (mis-sorted parcels
-# can carry the other building's label).
+# Neither civic number is ever a valid unit. Reject both, since a mis-sorted
+# parcel can carry the other building's label.
 _CIVIC_NUMBERS = {info["civic"] for info in _BUILDING_INFO.values()}
 
 
@@ -54,20 +44,13 @@ def _building_info(building: str) -> dict:
     return _BUILDING_INFO.get(building, _BUILDING_INFO["g2"])
 
 
-# ----------------------------------------------------------------------
-# --- IMAGE PREPROCESSING ----------------------------------------------
-# ----------------------------------------------------------------------
-
 def preprocess_image(image_path: str) -> str:
-    """
-    Enhance image quality for OCR: denoise, sharpen, boost contrast.
-    Returns path to a temp preprocessed file (caller should delete when done).
-    """
+    """Denoise, sharpen and boost contrast. Returns a temp file path."""
     img = cv2.imread(image_path)
     if img is None:
         return image_path
 
-    # Upscale small images so text is large enough for OCR
+    # Upscale small images so the text is large enough for OCR
     h, w = img.shape[:2]
     if max(h, w) < 1200:
         scale = 1200 / max(h, w)
@@ -76,14 +59,14 @@ def preprocess_image(image_path: str) -> str:
     # Denoise
     img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
 
-    # Convert to LAB and apply CLAHE on L-channel for better contrast
+    # CLAHE on the L channel for contrast
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     l = clahe.apply(l)
     img = cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
 
-    # Mild sharpening kernel
+    # Sharpen
     kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
     img = cv2.filter2D(img, -1, kernel)
 
@@ -92,14 +75,8 @@ def preprocess_image(image_path: str) -> str:
     return tmp.name
 
 
-# ----------------------------------------------------------------------
-# --- FALLBACK HELPERS -------------------------------------------------
-# ----------------------------------------------------------------------
-
 def guess_parcel_type(image_path: str) -> str:
-    """
-    Simple color + texture classifier for parcel type.
-    """
+    """Classify the parcel by average colour and edge density."""
     img = cv2.imread(image_path)
     if img is None:
         return "BROWN BOX"
@@ -132,21 +109,17 @@ def _is_civic_number(candidate: str) -> bool:
 
 
 def _extract_unit_from_text(text: str, building: str = "g2") -> str:
-    """
-    Try multiple patterns to extract a unit number from OCR text.
-    Preserves alphanumeric suffixes (e.g., 204A, 1911B).
-    Skips matches that are actually the building's civic number.
-    """
+    """Pull a unit number out of OCR text, keeping any letter suffix."""
     patterns = [
-        # Explicit keyword + optional separator + unit (with optional letter suffix)
+        # UNIT 204A, APT 204, #204
         r"(?:UNIT|APT|SUITE|APARTMENT|ROOM|RM|#)\s*[:#\-]?\s*(\d{1,5}[A-Z]?)\b",
-        # Unit embedded at the start of an address line: "1911B - 123 Main St"
+        # 1911B - 123 Main St
         r"^(\d{2,5}[A-Z]?)\s*[-,]",
-        # Unit after a dash in address: "123 Main St - 204A"
+        # 123 Main St - 204A
         r"-\s*(\d{2,5}[A-Z]?)\s*$",
-        # Bare unit on its own line (2-4 digits optionally followed by a letter)
+        # Bare unit on its own line
         r"^\s*(\d{2,4}[A-Z]?)\s*$",
-        # Fallback: first 2-5 digit sequence (with optional letter) that looks like a unit
+        # Last resort: any 2-5 digit run
         r"\b(\d{2,5}[A-Z]?)\b",
     ]
     for pat in patterns:
@@ -161,11 +134,8 @@ def _extract_unit_from_text(text: str, building: str = "g2") -> str:
 
 
 def _extract_name_from_text(text: str) -> str:
-    """
-    Extract recipient name from OCR text.
-    Looks for 'TO:' blocks first, then falls back to capitalized word pairs.
-    """
-    # Look for "TO:" label followed by a name on the same or next line
+    """Pull the recipient name out of OCR text."""
+    # TO: followed by a name
     to_block = re.search(
         r"(?:^|\n)\s*TO\s*:?\s*([A-Z][A-Za-z'\-]{1,}(?:\s+[A-Z][A-Za-z'\-]{1,})+)",
         text, re.MULTILINE
@@ -173,13 +143,13 @@ def _extract_name_from_text(text: str) -> str:
     if to_block:
         return to_block.group(1).strip().title()
 
-    # Capitalized full name (2+ words, allows short names like "Li Wang")
+    # Capitalised full name, two words or more
     name_match = re.search(
         r"\b([A-Z][A-Z'\-]{0,}(?:\s+[A-Z][A-Z'\-]{0,})+)\b", text
     )
     if name_match:
         candidate = name_match.group(1).strip()
-        # Avoid matching supplier names / common label keywords
+        # Skip couriers and address keywords
         skip_words = {
             "AMAZON", "FEDEX", "UPS", "DHL", "PUROLATOR", "CANADA POST",
             "CANPAR", "INTELCOM", "UNIT", "SUITE", "APT", "STREET", "AVENUE",
@@ -193,10 +163,7 @@ def _extract_name_from_text(text: str) -> str:
 
 
 def fallback_regex_ocr(image_path: str, building: str = "g2") -> Dict:
-    """
-    Backup OCR extraction using pytesseract + regex if Gemini fails.
-    Gracefully handles missing tesseract (returns UNKNOWN for text fields).
-    """
+    """Tesseract + regex extraction, used when Gemini fails."""
     preprocessed = preprocess_image(image_path)
     text = ""
     try:
@@ -232,10 +199,6 @@ def fallback_regex_ocr(image_path: str, building: str = "g2") -> Dict:
         "parcel_type": guess_parcel_type(image_path),
     }
 
-
-# ----------------------------------------------------------------------
-# --- GEMINI EXTRACTION ------------------------------------------------
-# ----------------------------------------------------------------------
 
 def _build_main_prompt(building: str) -> str:
     info = _building_info(building)
@@ -316,25 +279,18 @@ _FOCUSED_RESPONSE_SCHEMA = {
     "required": ["unit", "name"],
 }
 
-# Try the higher-quality model first; fall back to a cheaper one on quota errors
+# Better model first, cheaper one on quota errors
 _MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"]
 
 
 def _gemini_keys():
-    """
-    GEMINI_API_KEY may hold a single key or a comma-separated list — supporting
-    multiple keys lets us rotate to a backup the moment one hits its per-minute
-    or per-day rate limit (free-tier quotas are easy to hit even at low volume).
-    """
+    """GEMINI_API_KEY holds one key or a comma-separated list."""
     raw = os.getenv("GEMINI_API_KEY", "")
     return [k.strip() for k in raw.split(",") if k.strip()]
 
 
 def _post_to_gemini(payload: dict, timeout: int):
-    """
-    POST to the Gemini API, rotating through every (api_key, model) combination
-    until one returns a non-429 response. Returns the last response received.
-    """
+    """POST to Gemini, rotating (key, model) pairs past any 429."""
     keys = _gemini_keys()
     if not keys:
         raise ValueError("GEMINI_API_KEY not set")
@@ -349,7 +305,7 @@ def _post_to_gemini(payload: dict, timeout: int):
             print(f"Sending image to Gemini Vision API ({model}, key ...{api_key[-4:]})...")
             response = requests.post(url, json=payload, timeout=timeout)
             if response.status_code == 429:
-                print(f"[WARN] {model} quota exceeded for key ...{api_key[-4:]} — trying next...")
+                print(f"[WARN] {model} quota exceeded for key ...{api_key[-4:]}, trying next...")
                 continue
             return response
     return response
@@ -373,10 +329,7 @@ def _load_image_b64(image_path: str):
 
 
 def _parse_json_response(raw: str) -> Dict:
-    """
-    Structured output (responseSchema) should already return clean JSON, but
-    defensively strip code fences / salvage partial output just in case.
-    """
+    """Parse the model's JSON, stripping code fences and salvaging partials."""
     raw = raw.strip()
     try:
         return json.loads(raw)
@@ -391,7 +344,7 @@ def _parse_json_response(raw: str) -> Dict:
         except json.JSONDecodeError:
             pass
 
-    print(f"[WARN] JSON parse failed — salvaging fields from partial output:\n{raw}")
+    print(f"[WARN] JSON parse failed, salvaging fields from partial output:\n{raw}")
     data = {}
     for field in ("unit", "name", "supplier", "parcel_type"):
         m = re.search(rf'"{field}"\s*:\s*"([^"]*)"', raw)
@@ -403,11 +356,7 @@ def _parse_json_response(raw: str) -> Dict:
 
 
 def extract_with_gemini(image_path: str, building: str = "g2") -> Dict:
-    """
-    Primary extraction via Gemini Vision API with image preprocessing.
-    Uses structured output (responseSchema) so the model is constrained to
-    return exactly the four fields we need, every time.
-    """
+    """Primary extraction. responseSchema constrains the output to four fields."""
     if not _gemini_keys():
         raise ValueError("GEMINI_API_KEY not set")
 
@@ -446,49 +395,40 @@ def extract_with_gemini(image_path: str, building: str = "g2") -> Dict:
 
 
 def _normalize(data: Dict, image_path: str) -> Dict:
-    """
-    Normalize and validate extracted fields.
-    Preserves alphanumeric unit suffixes (e.g., 204A).
-    """
-    # --- Unit ---
+    """Validate and clean up the extracted fields."""
+    # Unit
     unit_raw = str(data.get("unit", "")).strip().upper()
     unit_match = re.search(r"\b(\d{1,5}[A-Z]?)\b", unit_raw)
     unit_candidate = unit_match.group(1) if unit_match else "UNKNOWN"
 
-    # Reject either building's civic number and numbers too small to be apartment units
+    # Civic numbers and anything under 100 are not units
     if _is_civic_number(unit_candidate):
         unit_candidate = "UNKNOWN"
     elif unit_candidate.isdigit() and int(unit_candidate) < 100:
         unit_candidate = "UNKNOWN"
 
-    # Reject pure 5-digit numbers (postal codes / zip codes)
+    # A bare 5-digit run is a postal or zip code
     if re.fullmatch(r"\d{5}", unit_candidate):
         unit_candidate = "UNKNOWN"
 
     data["unit"] = unit_candidate
 
-    # --- Name ---
+    # Name
     name = str(data.get("name", "")).strip()
     data["name"] = name.title() if name and name.upper() != "UNKNOWN" else "UNKNOWN"
 
-    # --- Supplier ---
+    # Supplier
     supplier = str(data.get("supplier", "OTHER")).strip().upper()
     data["supplier"] = supplier if supplier else "OTHER"
 
-    # --- Parcel type ---
+    # Parcel type
     data["parcel_type"] = str(data.get("parcel_type", "")).strip().upper() or guess_parcel_type(image_path)
 
     return data
 
 
-# ----------------------------------------------------------------------
-# --- RETRY WITH FOCUSED PROMPT ----------------------------------------
-# ----------------------------------------------------------------------
-
 def _retry_focused(image_path: str, current: Dict, building: str = "g2") -> Dict:
-    """
-    If unit or name is still UNKNOWN after first pass, do a second focused call.
-    """
+    """Second, narrower call when unit or name came back UNKNOWN."""
     if current.get("unit") != "UNKNOWN" and current.get("name") != "UNKNOWN":
         return current
 
@@ -542,16 +482,11 @@ def _retry_focused(image_path: str, current: Dict, building: str = "g2") -> Dict
     return current
 
 
-# ----------------------------------------------------------------------
-# --- MAIN WRAPPER -----------------------------------------------------
-# ----------------------------------------------------------------------
-
 def extract_data(image_path: str, building: str = "g2") -> Dict:
-    """
-    Unified interface: Gemini first → focused retry → fallback OCR.
-    `building` ('g1' or 'g2') tells Gemini the parcel's civic address so it
-    can pinpoint the unit number with near-certainty instead of guessing
-    between two numbers on the label.
+    """Gemini first, then a focused retry, then local OCR.
+
+    `building` ('g1' or 'g2') supplies the civic address so the model can
+    pinpoint the unit instead of guessing between the numbers on the label.
     """
     print(f"\n{'='*60}")
     print(f"ANALYZING: {os.path.basename(image_path)} (building={building})")
@@ -563,13 +498,13 @@ def extract_data(image_path: str, building: str = "g2") -> Dict:
         print(f"[WARN] Gemini failed: {e}\nUsing fallback OCR...")
         result = fallback_regex_ocr(image_path, building)
 
-    # Second pass: focused retry for any remaining UNKNOWN fields
+    # Second pass for anything still UNKNOWN
     result = _retry_focused(image_path, result, building)
 
-    # Final fallback fill for any still-missing fields
+    # Last resort: fill remaining gaps from local OCR
     for key in ["unit", "name", "supplier", "parcel_type"]:
         if not result.get(key) or result[key] == "UNKNOWN":
-            print(f"[WARN] {key} still unknown — filling via OCR fallback...")
+            print(f"[WARN] {key} still unknown, trying OCR fallback...")
             backup = fallback_regex_ocr(image_path, building)
             if backup.get(key) and backup[key] != "UNKNOWN":
                 result[key] = backup[key]
@@ -585,10 +520,6 @@ def extract_data(image_path: str, building: str = "g2") -> Dict:
 
     return result
 
-
-# ----------------------------------------------------------------------
-# --- CLI ENTRY --------------------------------------------------------
-# ----------------------------------------------------------------------
 
 if __name__ == "__main__":
     import sys

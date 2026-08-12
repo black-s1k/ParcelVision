@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""
-Inject the 1Valet auto-listener into a Chrome tab via the Chrome DevTools Protocol (CDP).
+"""Inject the 1Valet listener into a Chrome tab over the DevTools Protocol.
 
-One-time Chrome setup — run Chrome with the debug port flag:
-  macOS:  open -a "Google Chrome" --args --remote-debugging-port=9222
-  Linux:  google-chrome --remote-debugging-port=9222 &
-  Windows: "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222
-
-Or add  --remote-debugging-port=9222  permanently to your Chrome desktop shortcut.
-After that first launch, start.sh handles everything automatically.
+Chrome has to be started once with --remote-debugging-port=9222:
+  macOS:   open -a "Google Chrome" --args --remote-debugging-port=9222
+  Linux:   google-chrome --remote-debugging-port=9222 &
+  Windows: chrome.exe --remote-debugging-port=9222
 """
 
 import sys
@@ -18,7 +14,7 @@ import urllib.request
 import urllib.error
 
 CDP_PORT = 9222
-TAB_INDEX = 2   # 0-based index — tab 3 in the browser bar
+TAB_INDEX = 2   # 0-based, so tab 3 in the browser bar
 
 
 def _get_tabs():
@@ -34,12 +30,12 @@ def _get_tabs():
 def _find_tab(tabs):
     page_tabs = [t for t in tabs if t.get("type") == "page"]
 
-    # Prefer the actual 1Valet tab by URL (most reliable)
+    # Prefer the 1Valet tab by URL
     for t in page_tabs:
         if "1valetbas" in t.get("url", "").lower():
             return t, "1Valet URL match"
 
-    # Fall back to fixed tab index (tab 3 = index 2)
+    # Fall back to the fixed tab index
     if TAB_INDEX < len(page_tabs):
         return page_tabs[TAB_INDEX], f"tab index {TAB_INDEX} (tab {TAB_INDEX + 1})"
 
@@ -59,7 +55,7 @@ def _inject(tab, js):
 
     ws_url = tab.get("webSocketDebuggerUrl")
     if not ws_url:
-        raise RuntimeError("Tab has no webSocketDebuggerUrl — is another DevTools window open on this tab?")
+        raise RuntimeError("Tab has no webSocketDebuggerUrl. Is another DevTools window open on this tab?")
 
     ws = websocket.create_connection(ws_url, timeout=10)
     ws.send(json.dumps({
@@ -82,7 +78,7 @@ def _load_script(server_url: str) -> str:
 
 
 def _launch_chrome_with_debug():
-    """Try to open Chrome with the debug flag if it's not already running."""
+    """Open Chrome with the debug flag if it isn't already running."""
     import subprocess, platform
     plat = platform.system()
     try:
@@ -133,8 +129,8 @@ def main():
                 break
 
     if tabs is None:
-        print(f"\n❌  Cannot reach Chrome on port {CDP_PORT}.")
-        print("─" * 58)
+        print(f"\nCannot reach Chrome on port {CDP_PORT}.")
+        print("-" * 58)
         print("Chrome must be fully closed, then re-launched with the debug flag.")
         print("")
         print("  Windows — close ALL Chrome windows, then run in PowerShell/CMD:")
@@ -143,14 +139,14 @@ def main():
         print("  macOS:  open -a 'Google Chrome' --args --remote-debugging-port=9222")
         print("  Linux:  google-chrome --remote-debugging-port=9222 &")
         print("")
-        print("  ⚠️  If Chrome is already open you MUST close it fully first —")
-        print("      Chrome ignores the flag when another instance is running.")
-        print("─" * 58)
+        print("  If Chrome is already open you must close it fully first.")
+        print("  Chrome ignores the flag when another instance is running.")
+        print("-" * 58)
         sys.exit(1)
 
     tab, reason = _find_tab(tabs)
     if not tab:
-        print("❌  No page tabs found in Chrome. Open at least one page.")
+        print("No page tabs found in Chrome. Open at least one page.")
         sys.exit(1)
 
     title = tab.get("title", "?")[:55]
@@ -163,21 +159,21 @@ def main():
 
     err = result.get("result", {}).get("exceptionDetails") or result.get("error")
     if err:
-        print(f"⚠️   Injection note: {err}")
+        print(f"Injection note: {err}")
         return
 
     print(f"   SERVER_URL injected: {server_url}")
 
-    # Verify the script globals landed on the window
+    # Confirm the globals landed on the window
     verify = _inject(tab, "typeof window.startValetListener === 'function'")
     confirmed = verify.get("result", {}).get("result", {}).get("value", False)
     if confirmed:
-        print("   Script globals confirmed on window (startValetListener ✓)")
+        print("   Script globals confirmed on window (startValetListener)")
     else:
-        print("⚠️   startValetListener not found — injection may have failed")
+        print("startValetListener not found. Injection may have failed.")
         return
 
-    # Check whether the ADD DELIVERY popup (suite input) is already open
+    # Is the ADD DELIVERY popup already open?
     popup_check = _inject(tab, """
         (function() {
             var inputs = Array.prototype.slice.call(document.querySelectorAll('input'));
@@ -191,18 +187,16 @@ def main():
     """)
     popup_open = popup_check.get("result", {}).get("result", {}).get("value", False)
     if popup_open:
-        print("   'ADD DELIVERY' popup detected — listener will start automatically ✓")
+        print("   'ADD DELIVERY' popup detected, listener will start automatically.")
     else:
         print("")
-        print("  ┌─────────────────────────────────────────────────────┐")
-        print("  │  ⚠️  'ADD DELIVERY' popup is NOT open in this tab.  │")
-        print("  │  Open it now — the listener auto-starts in 3 s.    │")
-        print("  │  Or check the console and call startValetListener() │")
-        print("  └─────────────────────────────────────────────────────┘")
+        print("  'ADD DELIVERY' popup is not open in this tab.")
+        print("  Open it now and the listener auto-starts in 3s,")
+        print("  or call startValetListener() from the console.")
         print("")
     print("  To verify in Chrome DevTools console:")
-    print("    valetStatus()           ← shows running state + server URL")
-    print("    startValetListener()    ← (re-)start manually if needed")
+    print("    valetStatus()           shows running state and server URL")
+    print("    startValetListener()    restart manually if needed")
 
 
 if __name__ == "__main__":

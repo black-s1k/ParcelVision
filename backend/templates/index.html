@@ -38,7 +38,7 @@
       gap: 1rem;
     }
 
-    /* ── Header ── */
+    /* Header */
     .header {
       padding: 2rem 0 0.75rem;
     }
@@ -54,7 +54,7 @@
       margin-top: 0.25rem;
     }
 
-    /* ── Card ── */
+    /* Card */
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -62,7 +62,7 @@
       padding: 1.25rem;
     }
 
-    /* ── Upload zone ── */
+    /* Upload zone */
     .upload-zone {
       border: 1px dashed var(--border);
       border-radius: 8px;
@@ -107,7 +107,7 @@
       margin-top: 0.25rem;
     }
 
-    /* ── Preview ── */
+    /* Preview */
     .preview-wrap {
       display: none;
       border-radius: 8px;
@@ -139,7 +139,7 @@
       text-overflow: ellipsis;
     }
 
-    /* ── Buttons ── */
+    /* Buttons */
     .btn {
       width: 100%;
       padding: 0.875rem 1.5rem;
@@ -166,7 +166,7 @@
     }
     .btn-secondary:hover { background: rgba(255,255,255,0.04); color: var(--text); border-color: #444; }
 
-    /* ── Status bar ── */
+    /* Status bar */
     .status-bar {
       display: none;
       align-items: center;
@@ -182,7 +182,7 @@
     .status-bar.error   { background: rgba(239,68,68,0.08);   border-color: rgba(239,68,68,0.18);  color: #fca5a5; }
     .status-bar.show    { display: flex; }
 
-    /* ── Spinner ── */
+    /* Spinner */
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner {
       width: 13px; height: 13px;
@@ -193,7 +193,7 @@
       flex-shrink: 0;
     }
 
-    /* ── Result card ── */
+    /* Result card */
     .result-card { display: none; }
     .result-card.show { display: block; }
 
@@ -226,7 +226,7 @@
       white-space: nowrap;
     }
 
-    /* ── Meta grid ── */
+    /* Meta grid */
     .meta-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -256,7 +256,7 @@
     }
     .tile-name .meta-value { font-size: 0.875rem; }
 
-    /* ── Supplier badge ── */
+    /* Supplier badge */
     .supplier-badge {
       display: inline-block;
       padding: 0.2rem 0.5rem;
@@ -266,7 +266,7 @@
       letter-spacing: 0.04em;
     }
 
-    /* ── Building tabs ── */
+    /* Building tabs */
     .building-tabs {
       display: flex;
       gap: 0.5rem;
@@ -302,7 +302,7 @@
     }
     .btab.active .btab-addr { color: var(--text-2); }
 
-    /* ── Footer ── */
+    /* Footer */
     .footer {
       text-align: center;
       padding: 0.75rem 0;
@@ -310,7 +310,7 @@
       color: var(--text-3);
     }
 
-    /* ── Slide-in ── */
+    /* Slide-in */
     @keyframes slideUp {
       from { opacity: 0; transform: translateY(8px); }
       to   { opacity: 1; transform: translateY(0); }
@@ -392,7 +392,7 @@
   </div>
 
   <script>
-    /* ── DOM refs ── */
+    /* DOM refs */
     const fileInput       = document.getElementById("fileInput");
     const uploadZone      = document.getElementById("uploadZone");
     const uploadIconWrap  = document.getElementById("uploadIconWrap");
@@ -411,11 +411,11 @@
     const uploadMoreBtn   = document.getElementById("uploadMoreBtn");
     const headerSub       = document.querySelector(".header p");
 
-    /* ── Building selector ── */
+    /* Building selector */
     let selectedBuilding = "g2";
     const BUILDING_LABELS = {
-      g2: "Galleria 2 — parcel logging",
-      g1: "Galleria 1 — parcel logging",
+      g2: "Galleria 2 · parcel logging",
+      g1: "Galleria 1 · parcel logging",
     };
 
     function selectBuilding(b) {
@@ -439,7 +439,13 @@
       <line x1="12" y1="3" x2="12" y2="15"/>
     </svg>`;
 
-    /* ── Status helper ── */
+    const CHECK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"/>
+    </svg>`;
+
+    /* Status helper */
     function setStatus(type, icon, msg) {
       statusBar.className = "status-bar show " + type;
       statusIcon.innerHTML = icon;
@@ -447,7 +453,7 @@
     }
     function clearStatus() { statusBar.className = "status-bar"; }
 
-    /* ── Reset to initial state ── */
+    /* Reset to initial state */
     function resetUpload() {
       fileInput.value = "";
       uploadZone.classList.remove("has-file");
@@ -462,7 +468,7 @@
     }
     uploadMoreBtn.addEventListener("click", resetUpload);
 
-    /* ── File selected ── */
+    /* File selected */
     fileInput.addEventListener("change", () => {
       const file = fileInput.files[0];
       if (!file) return;
@@ -474,7 +480,7 @@
       };
       reader.readAsDataURL(file);
       uploadZone.classList.add("has-file");
-      uploadIconWrap.textContent = "✅";
+      uploadIconWrap.innerHTML = CHECK_SVG;
       uploadTitle.textContent = file.name;
       uploadSub.textContent = (file.size / 1024).toFixed(1) + " KB · ready to upload";
       submitBtn.disabled = false;
@@ -482,7 +488,7 @@
       clearStatus();
     });
 
-    /* ── Drag-and-drop ── */
+    /* Drag-and-drop */
     ["dragover","dragenter"].forEach(evt =>
       uploadZone.addEventListener(evt, e => { e.preventDefault(); uploadZone.style.borderColor = "#555"; })
     );
@@ -498,7 +504,7 @@
       }
     });
 
-    /* ── Image compression (max 1600px / 900 KB) ── */
+    /* Image compression (max 1600px / 900 KB) */
     function compressImage(file) {
       return new Promise(function(resolve) {
         const MAX_PX = 1600, MAX_BYTES = 900 * 1024;
@@ -521,7 +527,7 @@
       });
     }
 
-    /* ── Supplier badge colours ── */
+    /* Supplier badge colours */
     const SUPPLIER_STYLES = {
       AMAZON:        { bg:"rgba(255,153,0,0.1)",  border:"rgba(255,153,0,0.25)",  color:"#fbbf24" },
       UPS:           { bg:"rgba(93,62,0,0.18)",   border:"rgba(173,116,0,0.3)",   color:"#d97706" },
@@ -541,7 +547,7 @@
       >${supplier}</span>`;
     }
 
-    /* ── Build result tiles ── */
+    /* Build result tiles */
     function buildMeta(data) {
       const tiles = [
         { cls:"tile-unit",     label:"Unit",        value: data.unit || "—" },
@@ -557,7 +563,7 @@
       `).join("");
     }
 
-    /* ── Poll /result/<job_id> every 2s until done (max 60s) ── */
+    /* Poll /result/<job_id> every 2s until done (max 60s) */
     async function pollResult(jobId) {
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 2000));
@@ -566,7 +572,7 @@
           let data;
           try { data = await res.json(); } catch (e) { continue; }
           if (data.status === "success") {
-            setStatus("success", "✅", data.message || "Parcel logged successfully.");
+            setStatus("success", CHECK_SVG, data.message || "Parcel logged successfully.");
             savedName.textContent = data.image_saved_as || "";
             buildMeta(data.data || {});
             resultCard.classList.add("show", "slide-up");
@@ -578,14 +584,14 @@
             submitBtn.disabled = false;
             return;
           }
-        } catch (e) { /* network blip — keep polling */ }
+        } catch (e) { /* network blip, keep polling */ }
         setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label...");
       }
-      setStatus("error", "!", "Timed out — parcel may still have been logged. Check Google Sheets.");
+      setStatus("error", "!", "Timed out. The parcel may still have been logged, check Google Sheets.");
       submitBtn.disabled = false;
     }
 
-    /* ── Submit ── */
+    /* Submit */
     submitBtn.addEventListener("click", async () => {
       const file = fileInput.files[0];
       if (!file) return;
@@ -602,13 +608,13 @@
         const res = await fetch("/upload", { method: "POST", body: formData });
         let body;
         try { body = await res.json(); }
-        catch (e) { throw new Error("Server returned an unexpected response — check tunnel or server logs."); }
+        catch (e) { throw new Error("Server returned an unexpected response. Check the tunnel or server logs."); }
 
         if (body.job_id) {
           setStatus("info", `<div class="spinner"></div>`, "Analysing parcel label...");
           pollResult(body.job_id);
         } else if (body.status === "success") {
-          setStatus("success", "✅", body.message || "Parcel logged successfully.");
+          setStatus("success", CHECK_SVG, body.message || "Parcel logged successfully.");
           savedName.textContent = body.image_saved_as || "";
           buildMeta(body.data || {});
           resultCard.classList.add("show", "slide-up");
